@@ -23,9 +23,32 @@ local CONFLICT_END_PATTERN = "^>>>>>>> "
 ---@class BufferConflictState
 ---@field positions ConflictPosition[]
 ---@field mappings_set boolean
+---@field diagnostics_disabled boolean
 
 ---@type table<integer, BufferConflictState>
 local buffer_states = {}
+
+local function disable_diagnostics(bufnr)
+  local state = buffer_states[bufnr]
+  if state and state.diagnostics_disabled then
+    return
+  end
+  vim.diagnostic.enable(false, { bufnr = bufnr })
+  if state then
+    state.diagnostics_disabled = true
+  end
+  logger.debug("diff", "Disabled diagnostics for buffer " .. bufnr)
+end
+
+local function enable_diagnostics(bufnr)
+  local state = buffer_states[bufnr]
+  if not state or not state.diagnostics_disabled then
+    return
+  end
+  vim.diagnostic.enable(true, { bufnr = bufnr })
+  state.diagnostics_disabled = false
+  logger.debug("diff", "Re-enabled diagnostics for buffer " .. bufnr)
+end
 
 local autocmd_group = nil
 
@@ -50,6 +73,15 @@ local function setup_autocmds()
       if buffer_states[args.buf] then
         buffer_states[args.buf] = nil
         logger.debug("diff", "Cleaned up state for deleted buffer " .. args.buf)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("TextChanged", {
+    group = autocmd_group,
+    callback = function(args)
+      if buffer_states[args.buf] then
+        M.process_buffer(args.buf)
       end
     end,
   })
@@ -118,8 +150,31 @@ function M.highlight_conflicts(bufnr, positions)
   local config = get_config()
   local current_hl = config.diff and config.diff.highlights and config.diff.highlights.current or "DiffText"
   local incoming_hl = config.diff and config.diff.highlights and config.diff.highlights.incoming or "DiffAdd"
+  local mappings = config.diff and config.diff.mappings or {
+    ours = "co",
+    theirs = "ct",
+    both = "cb",
+    next = "]x",
+    prev = "[x",
+  }
+
+  local hint_text = string.format(
+    "[%s: ours, %s: theirs, %s: both, %s/%s: prev/next]",
+    mappings.ours,
+    mappings.theirs,
+    mappings.both,
+    mappings.prev,
+    mappings.next
+  )
 
   for _, pos in ipairs(positions) do
+    -- Add hint virtual text on the <<<<<<< line
+    vim.api.nvim_buf_set_extmark(bufnr, NAMESPACE, pos.current_start, 0, {
+      virt_text = { { "  " .. hint_text, "Comment" } },
+      virt_text_pos = "eol",
+      priority = 100,
+    })
+
     if pos.current_content_start <= pos.current_content_end then
       vim.api.nvim_buf_set_extmark(bufnr, NAMESPACE, pos.current_content_start, 0, {
         end_row = pos.current_content_end + 1,
@@ -147,7 +202,7 @@ function M.process_buffer(bufnr)
   local positions = M.detect_conflicts(lines)
 
   if not buffer_states[bufnr] then
-    buffer_states[bufnr] = { positions = {}, mappings_set = false }
+    buffer_states[bufnr] = { positions = {}, mappings_set = false, diagnostics_disabled = false }
   end
 
   buffer_states[bufnr].positions = positions
@@ -155,9 +210,11 @@ function M.process_buffer(bufnr)
   if #positions > 0 then
     M.highlight_conflicts(bufnr, positions)
     M.setup_buffer_mappings(bufnr)
+    disable_diagnostics(bufnr)
   else
     vim.api.nvim_buf_clear_namespace(bufnr, NAMESPACE, 0, -1)
     M.clear_buffer_mappings(bufnr)
+    enable_diagnostics(bufnr)
   end
 
   return positions
@@ -354,6 +411,7 @@ function M.clear(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_clear_namespace(bufnr, NAMESPACE, 0, -1)
   M.clear_buffer_mappings(bufnr)
+  enable_diagnostics(bufnr)
   buffer_states[bufnr] = nil
 end
 
