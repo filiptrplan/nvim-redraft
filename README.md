@@ -11,6 +11,7 @@ https://github.com/user-attachments/assets/4124e8e5-27ce-4628-b005-e0d7b65a1392
 - Switch between multiple LLM providers and models on the fly
 - Customizable system prompts and keybindings
 - Built with Lua and TypeScript for optimal performance
+- **Diff mode**: Review AI changes as git-style conflict markers before applying
 
 ## Installation
 
@@ -232,6 +233,72 @@ vim.keymap.set("v", "<C-a>", function()
 end, { desc = "AI Edit Selection" })
 ```
 
+### Diff Mode
+
+By default, AI edits are applied directly to your code. Enable `diff_mode` to review changes as git-style conflict markers first:
+
+```lua
+require("nvim-redraft").setup({
+  diff_mode = true,
+})
+```
+
+When enabled, AI suggestions appear as familiar conflict markers:
+
+```
+<<<<<<< Current
+function add(a, b) {
+  return a + b
+}
+=======
+/**
+ * Adds two numbers
+ */
+function add(a, b) {
+  return a + b
+}
+>>>>>>> Incoming
+```
+
+**Resolution keybindings** (buffer-local, active only when conflicts exist):
+
+| Key | Action |
+|-----|--------|
+| `co` | Keep original code (ours) |
+| `ct` | Accept AI suggestion (theirs) |
+| `cb` | Keep both versions |
+| `]x` | Jump to next conflict |
+| `[x` | Jump to previous conflict |
+
+**Diff configuration:**
+
+```lua
+require("nvim-redraft").setup({
+  diff_mode = true,
+  diff = {
+    autojump = true,  -- Jump to next conflict after resolution
+    mappings = {
+      ours = "co",
+      theirs = "ct",
+      both = "cb",
+      next = "]x",
+      prev = "[x",
+    },
+    highlights = {
+      current = "DiffText",   -- Highlight for original code
+      incoming = "DiffAdd",   -- Highlight for AI suggestion
+    },
+  },
+})
+```
+
+The plugin creates two highlight groups (`NvimRedraftCurrent` and `NvimRedraftIncoming`) linked to the configured highlights. Override them directly for custom styling:
+
+```lua
+vim.api.nvim_set_hl(0, "NvimRedraftCurrent", { bg = "#3c3836" })
+vim.api.nvim_set_hl(0, "NvimRedraftIncoming", { bg = "#3c5c3c" })
+```
+
 ### All Options
 
 ```lua
@@ -245,6 +312,21 @@ end, { desc = "AI Edit Selection" })
     default_model_index = number, -- Starting model index (default: 1)
     timeout = number,          -- Request timeout in ms (default: 30000)
     max_output_tokens = number,-- Max response tokens (default: 4096)
+  },
+  diff_mode = boolean,         -- Show changes as conflict markers (default: false)
+  diff = {
+    autojump = boolean,        -- Jump to next conflict after resolution (default: true)
+    mappings = {
+      ours = string,           -- Keep original (default: "co")
+      theirs = string,         -- Accept AI version (default: "ct")
+      both = string,           -- Keep both (default: "cb")
+      next = string,           -- Next conflict (default: "]x")
+      prev = string,           -- Previous conflict (default: "[x")
+    },
+    highlights = {
+      current = string,        -- Original code highlight (default: "DiffText")
+      incoming = string,       -- AI suggestion highlight (default: "DiffAdd")
+    },
   },
   input = {
     prompt = string,           -- Input prompt text (default: "AI Edit: ")
