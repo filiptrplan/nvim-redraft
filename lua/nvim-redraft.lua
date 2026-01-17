@@ -248,7 +248,6 @@ function M.edit()
         diff.inject_conflict_markers(bufnr, sel, result)
         local elapsed = (vim.loop.hrtime() - start_time) / 1e9
         logger.info("edit", string.format("Diff injected in %.2fs - awaiting resolution", elapsed))
-        vim.notify("[nvim-redraft] Review changes: co=ours, ct=theirs, cb=both", vim.log.levels.INFO)
       else
         replace.replace_selection(sel, result)
         local elapsed = (vim.loop.hrtime() - start_time) / 1e9
