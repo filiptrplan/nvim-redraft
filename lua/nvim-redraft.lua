@@ -5,6 +5,7 @@ local replace = require("nvim-redraft.replace")
 local logger = require("nvim-redraft.logger")
 local spinner = require("nvim-redraft.spinner")
 local model_selector = require("nvim-redraft.model_selector")
+local diff = require("nvim-redraft.diff")
 
 local M = {}
 
@@ -61,10 +62,30 @@ Be intelligent about preserving code structure, indentation, and style.]],
       col = 0,
     },
   },
+  diff_mode = false,
+  diff = {
+    autojump = true,
+    mappings = {
+      ours = "co",
+      theirs = "ct",
+      both = "cb",
+      next = "]x",
+      prev = "[x",
+    },
+    highlights = {
+      current = "DiffText",
+      incoming = "DiffAdd",
+    },
+  },
   debug = false,
   log_file = vim.fn.stdpath("state") .. "/nvim-redraft.log",
   debug_max_log_size = 5000,
 }
+
+local function setup_highlight_groups()
+  vim.api.nvim_set_hl(0, "NvimRedraftCurrent", { link = M.config.diff.highlights.current, default = true })
+  vim.api.nvim_set_hl(0, "NvimRedraftIncoming", { link = M.config.diff.highlights.incoming, default = true })
+end
 
 function M.setup(opts)
   opts = opts or {}
@@ -137,11 +158,13 @@ function M.setup(opts)
   logger.init(M.config)
   ipc.config = M.config
 
+  setup_highlight_groups()
+
   if M.config.keys then
     for _, key in ipairs(M.config.keys) do
       local mode = key.mode or "n"
-      local opts = { desc = key.desc }
-      vim.keymap.set(mode, key[1], key[2], opts)
+      local key_opts = { desc = key.desc }
+      vim.keymap.set(mode, key[1], key[2], key_opts)
     end
   end
 
@@ -175,6 +198,8 @@ function M.edit()
     vim.notify("[nvim-redraft] " .. err, vim.log.levels.ERROR)
     return
   end
+
+  local bufnr = vim.api.nvim_get_current_buf()
 
   input.get_instruction(M.config, function(instruction)
     logger.debug("edit", "User instruction: " .. instruction)
@@ -219,13 +244,21 @@ function M.edit()
 
       logger.debug("edit", "Final result:", result)
 
-      replace.replace_selection(sel, result)
-
-      local elapsed = (vim.loop.hrtime() - start_time) / 1e9
-      logger.info("edit", string.format("Edit completed successfully in %.2fs", elapsed))
-      vim.notify("[nvim-redraft] Edit applied", vim.log.levels.INFO)
+      if M.config.diff_mode then
+        diff.inject_conflict_markers(bufnr, sel, result)
+        local elapsed = (vim.loop.hrtime() - start_time) / 1e9
+        logger.info("edit", string.format("Diff injected in %.2fs - awaiting resolution", elapsed))
+        vim.notify("[nvim-redraft] Review changes: co=ours, ct=theirs, cb=both", vim.log.levels.INFO)
+      else
+        replace.replace_selection(sel, result)
+        local elapsed = (vim.loop.hrtime() - start_time) / 1e9
+        logger.info("edit", string.format("Edit completed successfully in %.2fs", elapsed))
+        vim.notify("[nvim-redraft] Edit applied", vim.log.levels.INFO)
+      end
     end)
   end)
 end
+
+M.diff = diff
 
 return M
