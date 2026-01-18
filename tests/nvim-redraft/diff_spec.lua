@@ -326,70 +326,70 @@ describe("diff", function()
   end)
 end)
 
-  describe("edge cases", function()
-    it("should handle empty incoming section", function()
-      local lines = {
-        "<<<<<<< Current",
-        "original code",
-        "=======",
-        ">>>>>>> Incoming",
-      }
+describe("edge cases", function()
+  it("should handle empty incoming section", function()
+    local lines = {
+      "<<<<<<< Current",
+      "original code",
+      "=======",
+      ">>>>>>> Incoming",
+    }
 
-      local positions = diff.detect_conflicts(lines)
+    local positions = diff.detect_conflicts(lines)
 
-      assert.equals(1, #positions)
-      assert.equals(3, positions[1].incoming_content_start)
-      assert.equals(2, positions[1].incoming_content_end)
-    end)
-
-    it("should return empty when choosing theirs with empty incoming", function()
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, {
-        "<<<<<<< Current",
-        "original code",
-        "=======",
-        ">>>>>>> Incoming",
-      })
-      diff.process_buffer(0)
-      local pos = diff.get_conflict_by_index(0, 1)
-
-      diff.resolve_conflict(0, pos, "theirs")
-
-      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-      assert.equals(1, #lines)
-      assert.equals("", lines[1])
-    end)
-
-    it("should resolve first conflict and keep second intact", function()
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, {
-        "<<<<<<< Current",
-        "first original",
-        "=======",
-        "first new",
-        ">>>>>>> Incoming",
-        "code between",
-        "<<<<<<< Current",
-        "second original",
-        "=======",
-        "second new",
-        ">>>>>>> Incoming",
-      })
-      diff.process_buffer(0)
-      assert.equals(2, diff.conflict_count(0))
-
-      local pos = diff.get_conflict_by_index(0, 1)
-      diff.resolve_conflict(0, pos, "theirs")
-
-      assert.equals(1, diff.conflict_count(0))
-
-      local remaining_pos = diff.get_conflict_by_index(0, 1)
-      assert.is_not_nil(remaining_pos)
-
-      diff.resolve_conflict(0, remaining_pos, "ours")
-
-      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-      assert.equals(3, #lines)
-      assert.equals("first new", lines[1])
-      assert.equals("code between", lines[2])
-      assert.equals("second original", lines[3])
-    end)
+    assert.equals(1, #positions)
+    assert.equals(3, positions[1].incoming_content_start)
+    assert.equals(2, positions[1].incoming_content_end)
   end)
+
+  it("should return empty when choosing theirs with empty incoming", function()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, {
+      "<<<<<<< Current",
+      "original code",
+      "=======",
+      ">>>>>>> Incoming",
+    })
+    diff.process_buffer(0)
+    local pos = diff.get_conflict_by_index(0, 1)
+
+    diff.resolve_conflict(0, pos, "theirs")
+
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert.equals(1, #lines)
+    assert.equals("", lines[1])
+  end)
+
+  it("should resolve first conflict and keep second intact", function()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, {
+      "<<<<<<< Current",
+      "first original",
+      "=======",
+      "first new",
+      ">>>>>>> Incoming",
+      "code between",
+      "<<<<<<< Current",
+      "second original",
+      "=======",
+      "second new",
+      ">>>>>>> Incoming",
+    })
+    diff.process_buffer(0)
+    assert.equals(2, diff.conflict_count(0))
+
+    local pos = diff.get_conflict_by_index(0, 1)
+    diff.resolve_conflict(0, pos, "theirs")
+
+    assert.equals(1, diff.conflict_count(0))
+
+    local remaining_pos = diff.get_conflict_by_index(0, 1)
+    assert.is_not_nil(remaining_pos)
+
+    diff.resolve_conflict(0, remaining_pos, "ours")
+
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert.equals(3, #lines)
+    assert.equals("first new", lines[1])
+    assert.equals("code between", lines[2])
+    assert.equals("second original", lines[3])
+  end)
+end)

@@ -101,7 +101,10 @@ function M.inject_conflict_markers(bufnr, selection, new_text)
 
   vim.api.nvim_buf_set_lines(bufnr, selection.start_line - 1, selection.end_line, false, conflict_lines)
 
-  logger.debug("diff", string.format("Injected conflict markers at lines %d-%d", selection.start_line, selection.end_line))
+  logger.debug(
+    "diff",
+    string.format("Injected conflict markers at lines %d-%d", selection.start_line, selection.end_line)
+  )
 
   setup_autocmds()
   M.process_buffer(bufnr)
@@ -117,7 +120,10 @@ function M.detect_conflicts(lines)
 
     if line:match(CONFLICT_START_PATTERN) then
       if in_conflict and current_position then
-        logger.warn("diff", string.format("Incomplete conflict at line %d (missing end marker)", current_position.current_start + 1))
+        logger.warn(
+          "diff",
+          string.format("Incomplete conflict at line %d (missing end marker)", current_position.current_start + 1)
+        )
       end
       current_position = {
         current_start = lnum,
@@ -138,7 +144,10 @@ function M.detect_conflicts(lines)
   end
 
   if in_conflict and current_position then
-    logger.warn("diff", string.format("Incomplete conflict at line %d (missing end marker)", current_position.current_start + 1))
+    logger.warn(
+      "diff",
+      string.format("Incomplete conflict at line %d (missing end marker)", current_position.current_start + 1)
+    )
   end
 
   return positions
@@ -150,13 +159,14 @@ function M.highlight_conflicts(bufnr, positions)
   local config = get_config()
   local current_hl = config.diff and config.diff.highlights and config.diff.highlights.current or "DiffText"
   local incoming_hl = config.diff and config.diff.highlights and config.diff.highlights.incoming or "DiffAdd"
-  local mappings = config.diff and config.diff.mappings or {
-    ours = "co",
-    theirs = "ct",
-    both = "cb",
-    next = "]x",
-    prev = "[x",
-  }
+  local mappings = config.diff and config.diff.mappings
+    or {
+      ours = "co",
+      theirs = "ct",
+      both = "cb",
+      next = "]x",
+      prev = "[x",
+    }
 
   local hint_text = string.format(
     "[%s: ours, %s: theirs, %s: both, %s/%s: prev/next]",
@@ -347,23 +357,34 @@ function M.setup_buffer_mappings(bufnr)
   end
 
   local config = get_config()
-  local mappings = config.diff and config.diff.mappings or {
-    ours = "co",
-    theirs = "ct",
-    both = "cb",
-    next = "]x",
-    prev = "[x",
-  }
+  local mappings = config.diff and config.diff.mappings
+    or {
+      ours = "co",
+      theirs = "ct",
+      both = "cb",
+      next = "]x",
+      prev = "[x",
+    }
 
   local function opts(desc)
     return { buffer = bufnr, silent = true, desc = "nvim-redraft: " .. desc }
   end
 
-  vim.keymap.set("n", mappings.ours, function() M.choose("ours") end, opts("choose ours"))
-  vim.keymap.set("n", mappings.theirs, function() M.choose("theirs") end, opts("choose theirs"))
-  vim.keymap.set("n", mappings.both, function() M.choose("both") end, opts("choose both"))
-  vim.keymap.set("n", mappings.next, function() M.jump_to_next() end, opts("next conflict"))
-  vim.keymap.set("n", mappings.prev, function() M.jump_to_prev() end, opts("previous conflict"))
+  vim.keymap.set("n", mappings.ours, function()
+    M.choose("ours")
+  end, opts("choose ours"))
+  vim.keymap.set("n", mappings.theirs, function()
+    M.choose("theirs")
+  end, opts("choose theirs"))
+  vim.keymap.set("n", mappings.both, function()
+    M.choose("both")
+  end, opts("choose both"))
+  vim.keymap.set("n", mappings.next, function()
+    M.jump_to_next()
+  end, opts("next conflict"))
+  vim.keymap.set("n", mappings.prev, function()
+    M.jump_to_prev()
+  end, opts("previous conflict"))
 
   if state then
     state.mappings_set = true
@@ -379,13 +400,14 @@ function M.clear_buffer_mappings(bufnr)
   end
 
   local config = get_config()
-  local mappings = config.diff and config.diff.mappings or {
-    ours = "co",
-    theirs = "ct",
-    both = "cb",
-    next = "]x",
-    prev = "[x",
-  }
+  local mappings = config.diff and config.diff.mappings
+    or {
+      ours = "co",
+      theirs = "ct",
+      both = "cb",
+      next = "]x",
+      prev = "[x",
+    }
 
   pcall(vim.keymap.del, "n", mappings.ours, { buffer = bufnr })
   pcall(vim.keymap.del, "n", mappings.theirs, { buffer = bufnr })
