@@ -18,6 +18,11 @@ Table of Contents                             *nvim-redraft-table-of-contents*
 A Neovim plugin for AI-powered inline code editing with support for multiple
 LLM providers (OpenAI, Anthropic, xAI, GitHub Copilot, OpenRouter, Cerebras).
 
+**Recommended:** For the fastest inference speeds, use Cerebras
+<https://cloud.cerebras.ai/> with `qwen-3-32b` or `gpt-oss-120b`. Cerebras
+delivers up to 3,000 tokens/sec - 15x faster than GPU-based inference - making
+AI edits feel instant.
+
 
 https://github.com/user-attachments/assets/4124e8e5-27ce-4628-b005-e0d7b65a1392
 
