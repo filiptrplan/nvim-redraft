@@ -12,6 +12,7 @@ https://github.com/user-attachments/assets/4124e8e5-27ce-4628-b005-e0d7b65a1392
 - No confirmation dialogs - seamless editing experience
 - Switch between multiple LLM providers and models on the fly
 - Customizable system prompts and keybindings
+- Mention extra files with `@path/to/file` to add context to an edit
 - Built with Lua and TypeScript for optimal performance
 - **Diff mode**: Review AI changes as git-style conflict markers before applying
 
@@ -110,6 +111,8 @@ export CEREBRAS_API_KEY="your-cerebras-api-key"
 3. Press `<leader>ae` and enter your instruction
 4. The AI applies changes inline
 
+You can mention extra files in the instruction with `@path/to/file` or include the current buffer with `@buffer`. Quoted paths such as `@"docs/my file.md"` are supported. Invalid mentions are ignored. When `Snacks.nvim` is available, typing `@` opens a file picker for quick insertion.
+
 ### Example
 
 Select this code:
@@ -135,6 +138,8 @@ function add(a, b) {
   return a + b
 }
 ```
+
+You can also use file mentions in instructions, for example: `align this function with @lua/nvim-redraft/input.lua @buffer`.
 
 ## Configuration
 

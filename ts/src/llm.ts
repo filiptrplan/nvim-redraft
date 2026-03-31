@@ -9,11 +9,28 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+export interface ContextFile {
+  path: string;
+  absolutePath: string;
+  content?: string;
+}
+
+interface LoadedContextFile {
+  path: string;
+  content: string;
+}
+
 export interface EditRequest {
   code: string;
   instruction: string;
   systemPrompt?: string;
+  contextFiles?: ContextFile[];
 }
+
+export const MAX_CONTEXT_FILE_BYTES = 32768;
+
+const DEFAULT_SYSTEM_PROMPT =
+  "You are a code editing assistant. Apply the user's requested changes to the code and return ONLY the modified code. Handle both brief instructions (e.g., 'add error handling') and detailed instructions equally well. Be precise and maintain code quality. Do not include explanations, markdown formatting, or any text before or after the code.";
 
 /**
  * LLMProvider interface defines the contract that all LLM providers must implement.
@@ -25,7 +42,12 @@ export interface EditRequest {
  * 4. Add the default model to DEFAULT_MODELS registry
  */
 export interface LLMProvider {
-  applyEdit(code: string, instruction: string, systemPrompt?: string): Promise<string>;
+  applyEdit(
+    code: string,
+    instruction: string,
+    systemPrompt?: string,
+    contextFiles?: ContextFile[],
+  ): Promise<string>;
 }
 
 abstract class BaseLLMProvider implements LLMProvider {
@@ -55,7 +77,77 @@ abstract class BaseLLMProvider implements LLMProvider {
     return match ? match[1] : trimmed;
   }
 
-  async applyEdit(code: string, instruction: string, systemPrompt?: string): Promise<string> {
+  protected loadContextFiles(contextFiles: ContextFile[] = []): LoadedContextFile[] {
+    const resolved: LoadedContextFile[] = [];
+
+    for (const file of contextFiles) {
+      try {
+        if (typeof file.content === 'string') {
+          if (Buffer.byteLength(file.content, 'utf8') > MAX_CONTEXT_FILE_BYTES) {
+            logger.debug('apply-edit', `Skipping oversized inline context file: ${file.path}`);
+            continue;
+          }
+
+          if (file.content.includes('\0')) {
+            logger.debug('apply-edit', `Skipping binary-looking inline context file: ${file.path}`);
+            continue;
+          }
+
+          resolved.push({
+            path: file.path,
+            content: file.content,
+          });
+          continue;
+        }
+
+        const stat = fs.statSync(file.absolutePath);
+        if (!stat.isFile()) {
+          continue;
+        }
+
+        if (stat.size > MAX_CONTEXT_FILE_BYTES) {
+          logger.debug('apply-edit', `Skipping oversized context file: ${file.path}`);
+          continue;
+        }
+
+        const content = fs.readFileSync(file.absolutePath, 'utf8');
+        if (content.includes('\0')) {
+          logger.debug('apply-edit', `Skipping binary-looking context file: ${file.path}`);
+          continue;
+        }
+
+        resolved.push({
+          path: file.path,
+          content,
+        });
+      } catch (error) {
+        logger.debug('apply-edit', `Skipping unreadable context file: ${file.path}`);
+      }
+    }
+
+    return resolved;
+  }
+
+  protected buildUserMessage(code: string, instruction: string, contextFiles: ContextFile[] = []): string {
+    const sections = [`Instruction:\n${instruction}`, `Selected code:\n${code}`];
+    const loadedContextFiles = this.loadContextFiles(contextFiles);
+
+    if (loadedContextFiles.length > 0) {
+      const contextText = loadedContextFiles
+        .map((file) => `File: ${file.path}\n${file.content}`)
+        .join('\n\n');
+      sections.push(`Additional file context:\n${contextText}`);
+    }
+
+    return sections.join('\n\n');
+  }
+
+  async applyEdit(
+    code: string,
+    instruction: string,
+    systemPrompt?: string,
+    contextFiles?: ContextFile[],
+  ): Promise<string> {
     logger.debug('apply-edit', `Calling ${this.model} for edit`);
     logger.debug('apply-edit', 'Input code:', code);
     logger.debug('apply-edit', 'Instruction:', instruction);
@@ -64,10 +156,8 @@ abstract class BaseLLMProvider implements LLMProvider {
 
     const provider = this.createProviderInstance();
 
-    const defaultSystemPrompt =
-      "You are a code editing assistant. Apply the user's requested changes to the code and return ONLY the modified code. Handle both brief instructions (e.g., 'add error handling') and detailed instructions equally well. Be precise and maintain code quality. Do not include explanations, markdown formatting, or any text before or after the code.";
-
     const options = this.getGenerateTextOptions('apply', systemPrompt);
+    const userMessage = this.buildUserMessage(code, instruction, contextFiles);
 
     const result = await generateText({
       model: provider(this.model),
@@ -75,11 +165,11 @@ abstract class BaseLLMProvider implements LLMProvider {
       messages: [
         {
           role: 'system',
-          content: systemPrompt || defaultSystemPrompt,
+          content: systemPrompt || DEFAULT_SYSTEM_PROMPT,
         },
         {
           role: 'user',
-          content: `${instruction}\n\n${code}`,
+          content: userMessage,
         },
       ],
     });
@@ -111,24 +201,26 @@ abstract class OpenAICompatibleProvider extends BaseLLMProvider {
   protected abstract getEndpoint(): string;
   protected abstract getAuthHeaders(): Promise<Record<string, string>>;
 
-  async applyEdit(code: string, instruction: string, systemPrompt?: string): Promise<string> {
+  async applyEdit(
+    code: string,
+    instruction: string,
+    systemPrompt?: string,
+    contextFiles?: ContextFile[],
+  ): Promise<string> {
     logger.debug('apply-edit', `Calling ${this.model} for edit`);
     logger.debug('apply-edit', 'Input code:', code);
     logger.debug('apply-edit', 'Instruction:', instruction);
 
     const startTime = Date.now();
 
-    const defaultSystemPrompt =
-      "You are a code editing assistant. Apply the user's requested changes to the code and return ONLY the modified code. Handle both brief instructions (e.g., 'add error handling') and detailed instructions equally well. Be precise and maintain code quality. Do not include explanations, markdown formatting, or any text before or after the code.";
-
     const messages = [
       {
         role: 'system',
-        content: systemPrompt || defaultSystemPrompt,
+        content: systemPrompt || DEFAULT_SYSTEM_PROMPT,
       },
       {
         role: 'user',
-        content: `${instruction}\n\n${code}`,
+        content: this.buildUserMessage(code, instruction, contextFiles),
       },
     ];
 
@@ -362,14 +454,17 @@ class AnthropicProvider extends BaseLLMProvider {
       maxOutputTokens: this.maxOutputTokens,
     };
 
-    const defaultSystemPrompt =
-      "You are a code editing assistant. Apply the user's requested changes to the code and return ONLY the modified code. Handle both brief instructions (e.g., 'add error handling') and detailed instructions equally well. Be precise and maintain code quality. Do not include explanations, markdown formatting, or any text before or after the code.";
-    options.system = systemPrompt || defaultSystemPrompt;
+    options.system = systemPrompt || DEFAULT_SYSTEM_PROMPT;
 
     return options;
   }
 
-  async applyEdit(code: string, instruction: string, systemPrompt?: string): Promise<string> {
+  async applyEdit(
+    code: string,
+    instruction: string,
+    systemPrompt?: string,
+    contextFiles?: ContextFile[],
+  ): Promise<string> {
     logger.debug('apply-edit', `Calling ${this.model} for edit`);
     logger.debug('apply-edit', 'Input code:', code);
     logger.debug('apply-edit', 'Instruction:', instruction);
@@ -386,7 +481,7 @@ class AnthropicProvider extends BaseLLMProvider {
       messages: [
         {
           role: 'user',
-          content: `${instruction}\n\n${code}`,
+          content: this.buildUserMessage(code, instruction, contextFiles),
         },
       ],
     });
@@ -547,13 +642,13 @@ export class LLMService {
   }
 
   async edit(request: EditRequest): Promise<string> {
-    const { code, instruction, systemPrompt } = request;
+    const { code, instruction, systemPrompt, contextFiles } = request;
 
     logger.debug('llm', 'Starting edit process');
     logger.debug('llm', `Instruction: ${instruction}`);
 
     try {
-      const editedCode = await this.provider.applyEdit(code, instruction, systemPrompt);
+      const editedCode = await this.provider.applyEdit(code, instruction, systemPrompt, contextFiles);
 
       logger.info('llm', 'Edit completed successfully');
       return editedCode;

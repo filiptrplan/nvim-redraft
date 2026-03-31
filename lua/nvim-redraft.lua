@@ -6,6 +6,7 @@ local logger = require("nvim-redraft.logger")
 local spinner = require("nvim-redraft.spinner")
 local model_selector = require("nvim-redraft.model_selector")
 local diff = require("nvim-redraft.diff")
+local mentions = require("nvim-redraft.mentions")
 
 local M = {}
 
@@ -24,7 +25,9 @@ Generate a sparse edit showing only the changes needed:
 - Make your edit clear and unambiguous
 - Return ONLY the modified code, no explanations or markdown formatting
 
-Be intelligent about preserving code structure, indentation, and style.]],
+Be intelligent about preserving code structure, indentation, and style.
+
+If additional file context is provided, use it only as reference material. Return edits for the selected code only.]],
   keys = {
     {
       "<leader>ae",
@@ -202,7 +205,12 @@ function M.edit()
   local bufnr = vim.api.nvim_get_current_buf()
 
   input.get_instruction(M.config, function(instruction)
+    local mention_result = mentions.parse(instruction, {
+      workspace_root = mentions.get_workspace_root(),
+    })
+
     logger.debug("edit", "User instruction: " .. instruction)
+    logger.debug("edit", "Resolved instruction: " .. mention_result.instruction)
     logger.debug("edit", "Selected code:", sel.text)
     logger.debug(
       "edit",
@@ -216,6 +224,14 @@ function M.edit()
     )
     logger.debug("edit", "System prompt:", M.config.system_prompt)
 
+    if #mention_result.context_files > 0 then
+      logger.debug("edit", "Mentioned files:", vim.inspect(mention_result.context_files))
+    end
+
+    if #mention_result.skipped_mentions > 0 then
+      logger.debug("edit", "Skipped mentions:", table.concat(mention_result.skipped_mentions, ", "))
+    end
+
     local current_model = M.config.llm.models[M.config.llm.current_index]
     logger.debug(
       "edit",
@@ -226,12 +242,13 @@ function M.edit()
 
     ipc.send_request({
       code = sel.text,
-      instruction = instruction,
+      instruction = mention_result.instruction,
       systemPrompt = M.config.system_prompt,
       provider = current_model.provider,
       model = current_model.model,
       baseURL = M.config.llm.base_url,
       maxOutputTokens = M.config.llm.max_output_tokens,
+      contextFiles = mention_result.context_files,
     }, function(result, error)
       spinner.stop()
 

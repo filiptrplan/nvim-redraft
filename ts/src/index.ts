@@ -1,5 +1,5 @@
 import * as readline from 'readline';
-import { LLMService, createProvider, getApiKey, getDefaultModel } from './llm';
+import { ContextFile, LLMService, createProvider, getApiKey, getDefaultModel } from './llm';
 import { logger } from './logger';
 
 interface JSONRPCRequest {
@@ -8,10 +8,11 @@ interface JSONRPCRequest {
   params: {
     code: string;
     instruction: string;
-    systemPrompt?: string;
-    provider?: string;
-    model?: string;
-    baseURL?: string;
+      systemPrompt?: string;
+      contextFiles?: ContextFile[];
+      provider?: string;
+      model?: string;
+      baseURL?: string;
     maxOutputTokens?: number;
   };
 }
@@ -99,6 +100,7 @@ class JSONRPCServer {
         code: request.params.code,
         instruction: request.params.instruction,
         systemPrompt: request.params.systemPrompt,
+        contextFiles: request.params.contextFiles,
       });
 
       logger.debug('server', `Request #${request.id} completed successfully`);

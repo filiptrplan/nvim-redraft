@@ -171,5 +171,70 @@ describe("input", function()
 
       package.loaded["snacks"] = nil
     end)
+
+    it("should attach mention completion when Snacks picker is available", function()
+      local original_keymap_set = vim.keymap.set
+      local keymap_calls = {}
+
+      vim.keymap.set = function(mode, lhs, rhs, opts)
+        table.insert(keymap_calls, {
+          mode = mode,
+          lhs = lhs,
+          opts = opts,
+          rhs = rhs,
+        })
+      end
+
+      package.loaded["snacks"] = {
+        input = function(_, callback)
+          return { buf = 11, win = 22 }
+        end,
+        picker = {
+          files = function() end,
+        },
+      }
+
+      input.get_instruction(mock_config, function() end)
+
+      vim.keymap.set = original_keymap_set
+      package.loaded["snacks"] = nil
+
+      assert.equals(1, #keymap_calls)
+      assert.equals("i", keymap_calls[1].mode)
+      assert.equals("@", keymap_calls[1].lhs)
+      assert.equals(11, keymap_calls[1].opts.buffer)
+      assert.is_true(keymap_calls[1].opts.expr)
+    end)
+
+    it("should insert selected file path from the mention picker", function()
+      local original_cwd = vim.fn.getcwd()
+      local temp_dir = vim.fn.tempname()
+      local current_buf = vim.api.nvim_get_current_buf()
+      local current_win = vim.api.nvim_get_current_win()
+
+      vim.fn.mkdir(temp_dir, "p")
+      vim.fn.chdir(temp_dir)
+      vim.api.nvim_buf_set_name(current_buf, temp_dir .. "/current.lua")
+      vim.api.nvim_buf_set_lines(current_buf, 0, -1, false, { "@" })
+      vim.api.nvim_win_set_cursor(current_win, { 1, 1 })
+
+      local snacks = {
+        picker = {
+          files = function(opts)
+            opts.confirm({ close = function() end }, { file = "src/helper.lua" })
+          end,
+        },
+      }
+
+      input.open_mention_picker(snacks, { buf = current_buf, win = current_win })
+
+      vim.wait(1000, function()
+        return vim.api.nvim_buf_get_lines(current_buf, 0, 1, false)[1] == "@src/helper.lua"
+      end)
+
+      vim.fn.chdir(original_cwd)
+
+      assert.equals("@src/helper.lua", vim.api.nvim_buf_get_lines(current_buf, 0, 1, false)[1])
+    end)
   end)
 end)

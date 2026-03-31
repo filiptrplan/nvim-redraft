@@ -5,6 +5,7 @@ import {
   LLMService,
   PROVIDER_API_KEYS,
   DEFAULT_MODELS,
+  MAX_CONTEXT_FILE_BYTES,
 } from '../llm';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -152,6 +153,27 @@ describe('LLM Provider System', () => {
       expect(service.edit).toBeDefined();
       expect(typeof service.edit).toBe('function');
     });
+
+    it('should forward context files to providers', async () => {
+      const provider = {
+        applyEdit: jest.fn().mockResolvedValue('updated'),
+      };
+      const service = new LLMService(provider as any);
+
+      const result = await service.edit({
+        code: 'const x = 1;',
+        instruction: 'use helper',
+        contextFiles: [{ path: 'helper.ts', absolutePath: '/tmp/helper.ts' }],
+      });
+
+      expect(result).toBe('updated');
+      expect(provider.applyEdit).toHaveBeenCalledWith(
+        'const x = 1;',
+        'use helper',
+        undefined,
+        [{ path: 'helper.ts', absolutePath: '/tmp/helper.ts' }],
+      );
+    });
   });
 });
 
@@ -232,6 +254,69 @@ describe('Provider interfaces', () => {
   it('should implement LLMProvider interface - Cerebras', () => {
     const provider = createProvider('cerebras', 'test-key', 'qwen-3-235b-a22b-instruct-2507');
     expect(typeof provider.applyEdit).toBe('function');
+  });
+});
+
+describe('Context file prompts', () => {
+  const mockFs = fs as jest.Mocked<typeof fs>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should append valid context files to the user message', () => {
+    const provider = createProvider('openai', 'test-key', 'gpt-4o-mini') as any;
+
+    mockFs.statSync.mockReturnValue({ isFile: () => true, size: 24 } as any);
+    mockFs.readFileSync.mockReturnValue('export const helper = true;');
+
+    const message = provider.buildUserMessage('const x = 1;', 'use helper', [
+      { path: 'src/helper.ts', absolutePath: '/tmp/src/helper.ts' },
+    ]);
+
+    expect(message).toContain('Instruction:\nuse helper');
+    expect(message).toContain('Selected code:\nconst x = 1;');
+    expect(message).toContain('Additional file context:');
+    expect(message).toContain('File: src/helper.ts\nexport const helper = true;');
+  });
+
+  it('should use inline context file content when provided', () => {
+    const provider = createProvider('openai', 'test-key', 'gpt-4o-mini') as any;
+
+    const loaded = provider.loadContextFiles([
+      { path: 'current.ts', absolutePath: '', content: 'const bufferValue = 1;' },
+    ]);
+
+    expect(loaded).toEqual([{ path: 'current.ts', content: 'const bufferValue = 1;' }]);
+    expect(mockFs.statSync).not.toHaveBeenCalled();
+  });
+
+  it('should skip oversized and unreadable context files', () => {
+    const provider = createProvider('openai', 'test-key', 'gpt-4o-mini') as any;
+
+    mockFs.statSync
+      .mockReturnValueOnce({ isFile: () => true, size: MAX_CONTEXT_FILE_BYTES + 1 } as any)
+      .mockImplementationOnce(() => {
+        throw new Error('missing');
+      });
+
+    const loaded = provider.loadContextFiles([
+      { path: 'big.ts', absolutePath: '/tmp/big.ts' },
+      { path: 'missing.ts', absolutePath: '/tmp/missing.ts' },
+    ]);
+
+    expect(loaded).toEqual([]);
+  });
+
+  it('should skip binary-looking context files', () => {
+    const provider = createProvider('openai', 'test-key', 'gpt-4o-mini') as any;
+
+    mockFs.statSync.mockReturnValue({ isFile: () => true, size: 12 } as any);
+    mockFs.readFileSync.mockReturnValue('abc\0def');
+
+    const loaded = provider.loadContextFiles([{ path: 'bin.dat', absolutePath: '/tmp/bin.dat' }]);
+
+    expect(loaded).toEqual([]);
   });
 });
 

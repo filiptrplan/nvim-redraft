@@ -33,8 +33,23 @@ describe("ipc", function()
 
   describe("request handling", function()
     it("should send request and receive response", function()
-      local done = false
+      local original_start_service = ipc.start_service
+      local original_chansend = vim.fn.chansend
       local result_text = nil
+      local done = false
+
+      ipc.start_service = function()
+        ipc.job_id = 99
+        return true
+      end
+
+      vim.fn.chansend = function(_, data)
+        local request = vim.fn.json_decode(data)
+        ipc.handle_response(vim.fn.json_encode({
+          id = request.id,
+          result = "const x = 1;",
+        }))
+      end
 
       ipc.send_request({
         code = "const x = 1",
@@ -45,11 +60,39 @@ describe("ipc", function()
         result_text = result
       end)
 
-      vim.wait(5000, function()
-        return done
-      end)
+      ipc.start_service = original_start_service
+      vim.fn.chansend = original_chansend
 
       assert.is_true(done)
+      assert.equals("const x = 1;", result_text)
+    end)
+
+    it("should encode context files in the request payload", function()
+      local original_start_service = ipc.start_service
+      local original_chansend = vim.fn.chansend
+      local payload = nil
+
+      ipc.start_service = function()
+        ipc.job_id = 99
+        return true
+      end
+
+      vim.fn.chansend = function(_, data)
+        payload = vim.fn.json_decode(data)
+      end
+
+      ipc.send_request({
+        code = "const x = 1",
+        instruction = "use helper",
+        contextFiles = {
+          { path = "helper.lua", absolutePath = "/tmp/helper.lua" },
+        },
+      }, function() end)
+
+      ipc.start_service = original_start_service
+      vim.fn.chansend = original_chansend
+
+      assert.equals("helper.lua", payload.params.contextFiles[1].path)
     end)
   end)
 end)
