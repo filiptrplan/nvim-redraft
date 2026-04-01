@@ -50,6 +50,9 @@ describe("nvim-redraft", function()
         get_visual_selection = function()
           return {
             text = "local x = 1",
+            context_text = "before\n__NVIM_REDRAFT_SELECTION_START__local x = 1__NVIM_REDRAFT_SELECTION_END__\nafter",
+            context_start_line = 1,
+            context_end_line = 3,
             start_line = 1,
             end_line = 1,
             start_col = 0,
@@ -104,8 +107,14 @@ describe("nvim-redraft", function()
 
     assert.is_not_nil(captured_request)
     assert.equals("refactor this using", captured_request.instruction)
+    assert.equals(
+      "before\n__NVIM_REDRAFT_SELECTION_START__local x = 1__NVIM_REDRAFT_SELECTION_END__\nafter",
+      captured_request.selectionContext
+    )
     assert.equals(1, #captured_request.contextFiles)
     assert.equals("helper.lua", captured_request.contextFiles[1].path)
+    assert.is_true(captured_request.systemPrompt:find("Selection edit requests may include surrounding selection context", 1, true) ~= nil)
+    assert.is_true(captured_request.systemPrompt:find("The surrounding context is read-only and MUST NOT be edited.", 1, true) ~= nil)
     assert.is_true(captured_request.systemPrompt:find("Direct-apply mode is enabled for selection edits.", 1, true) ~= nil)
     assert.is_true(captured_request.systemPrompt:find("Do not return a diff, patch, conflict markers", 1, true) ~= nil)
   end)
@@ -118,6 +127,9 @@ describe("nvim-redraft", function()
         get_visual_selection = function()
           return {
             text = "local x = 1",
+            context_text = "before\n__NVIM_REDRAFT_SELECTION_START__local x = 1__NVIM_REDRAFT_SELECTION_END__\nafter",
+            context_start_line = 1,
+            context_end_line = 3,
             start_line = 1,
             end_line = 1,
             start_col = 0,
@@ -183,6 +195,106 @@ describe("nvim-redraft", function()
     assert.is_not_nil(captured_request)
     assert.is_true(captured_request.systemPrompt:find("Diff mode is enabled for selection edits.", 1, true) ~= nil)
     assert.is_true(captured_request.systemPrompt:find("Do not return conflict markers, a unified diff, a patch", 1, true) ~= nil)
+  end)
+
+  it("uses the configured selection context radius for visual edits", function()
+    local captured_radius
+
+    with_stubbed_modules({
+      ["nvim-redraft.selection"] = {
+        get_visual_selection = function(radius)
+          captured_radius = radius
+          return {
+            text = "local x = 1",
+            context_text = "__NVIM_REDRAFT_SELECTION_START__local x = 1__NVIM_REDRAFT_SELECTION_END__",
+            context_start_line = 1,
+            context_end_line = 1,
+            start_line = 1,
+            end_line = 1,
+            start_col = 0,
+            end_col = 10,
+          }
+        end,
+      },
+      ["nvim-redraft.input"] = {
+        get_instruction = function(_, callback)
+          callback("rewrite this")
+        end,
+      },
+      ["nvim-redraft.ipc"] = {
+        config = {},
+        send_request = function(_, callback)
+          callback("updated", nil)
+        end,
+        stop_service = function() end,
+      },
+      ["nvim-redraft.replace"] = {
+        replace_selection = function() end,
+      },
+      ["nvim-redraft.logger"] = {
+        init = function() end,
+        info = function() end,
+        debug = function() end,
+        error = function() end,
+        warn = function() end,
+      },
+      ["nvim-redraft.spinner"] = {
+        start = function() end,
+        stop = function() end,
+      },
+      ["nvim-redraft.model_selector"] = {
+        get_model_selection = function() end,
+      },
+      ["nvim-redraft.diff"] = {
+        inject_conflict_markers = function() end,
+      },
+      ["nvim-redraft.mentions"] = {
+        parse = function(instruction)
+          return {
+            instruction = instruction,
+            context_files = {},
+            skipped_mentions = {},
+          }
+        end,
+        get_workspace_root = function()
+          return vim.fn.getcwd()
+        end,
+      },
+    }, function()
+      local redraft = dofile(repo_root .. "/lua/nvim-redraft.lua")
+      redraft.setup({
+        selection_context_radius = 12,
+        keys = {},
+        llm = {
+          models = {
+            { provider = "openai", model = "gpt-4o-mini" },
+          },
+        },
+      })
+      redraft.edit()
+    end)
+
+    assert.equals(12, captured_radius)
+  end)
+
+  it("validates selection_context_radius during setup", function()
+    with_stubbed_modules({
+      ["nvim-redraft.selection"] = {},
+      ["nvim-redraft.input"] = {},
+      ["nvim-redraft.ipc"] = { config = {}, stop_service = function() end },
+      ["nvim-redraft.replace"] = {},
+      ["nvim-redraft.logger"] = { init = function() end },
+      ["nvim-redraft.spinner"] = {},
+      ["nvim-redraft.model_selector"] = {},
+      ["nvim-redraft.diff"] = {},
+      ["nvim-redraft.mentions"] = {},
+    }, function()
+      local redraft = dofile(repo_root .. "/lua/nvim-redraft.lua")
+
+      assert.has_error(function()
+        redraft.setup({ selection_context_radius = -1, keys = {} })
+      end, "selection_context_radius must be a non-negative number")
+    end)
   end)
 
   it("sends cursor context and inserts directly in normal mode", function()

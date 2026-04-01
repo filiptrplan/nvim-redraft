@@ -17,6 +17,13 @@ Return ONLY the code that should be inserted at that marker.
 Do not repeat the surrounding context.
 Do not include the marker in your response.]]
 
+local SELECTION_CONTEXT_SYSTEM_PROMPT_SUFFIX = [[
+
+Selection edit requests may include surrounding selection context marked with __NVIM_REDRAFT_SELECTION_START__ and __NVIM_REDRAFT_SELECTION_END__.
+Use that surrounding context only as reference material.
+The surrounding context is read-only and MUST NOT be edited.
+Return edits for the selected code only, never the extra surrounding context or selection markers.]]
+
 local DIRECT_APPLY_SYSTEM_PROMPT_SUFFIX = [[
 
 Direct-apply mode is enabled for selection edits.
@@ -48,7 +55,9 @@ Generate a sparse edit showing only the changes needed:
 
 Be intelligent about preserving code structure, indentation, and style.
 
-If additional file context is provided, use it only as reference material. Return edits for the selected code only.]],
+If additional file context is provided, use it only as reference material.
+Return edits for the selected code only.
+Do not edit, rewrite, or return any code outside the selected code.]],
   keys = {
     {
       "<leader>ae",
@@ -94,6 +103,7 @@ If additional file context is provided, use it only as reference material. Retur
       col = 0,
     },
   },
+  selection_context_radius = 30,
   diff_mode = false,
   diff = {
     autojump = true,
@@ -124,6 +134,12 @@ function M.setup(opts)
 
   if type(opts.llm) == "table" and type(opts.llm.timeout) == "number" and opts.llm.timeout <= 0 then
     error("llm.timeout must be a positive number")
+  end
+
+  if opts.selection_context_radius ~= nil then
+    if type(opts.selection_context_radius) ~= "number" or opts.selection_context_radius < 0 then
+      error("selection_context_radius must be a non-negative number")
+    end
   end
 
   if type(opts.llm) == "table" and opts.llm.models and (opts.llm.provider or opts.llm.model) then
@@ -220,11 +236,13 @@ function M.select_model()
 end
 
 local function get_edit_system_prompt()
+  local base_prompt = M.config.system_prompt .. SELECTION_CONTEXT_SYSTEM_PROMPT_SUFFIX
+
   if M.config.diff_mode then
-    return M.config.system_prompt .. DIFF_MODE_SYSTEM_PROMPT_SUFFIX
+    return base_prompt .. DIFF_MODE_SYSTEM_PROMPT_SUFFIX
   end
 
-  return M.config.system_prompt .. DIRECT_APPLY_SYSTEM_PROMPT_SUFFIX
+  return base_prompt .. DIRECT_APPLY_SYSTEM_PROMPT_SUFFIX
 end
 
 local function run_request(opts)
@@ -271,6 +289,7 @@ local function run_request(opts)
       model = current_model.model,
       baseURL = M.config.llm.base_url,
       maxOutputTokens = M.config.llm.max_output_tokens,
+      selectionContext = opts.selection_context,
       contextFiles = mention_result.context_files,
     }, function(result, error)
       spinner.stop()
@@ -295,7 +314,7 @@ end
 
 function M.edit()
   vim.cmd('normal! "vy')
-  local sel, err = selection.get_visual_selection()
+  local sel, err = selection.get_visual_selection(M.config.selection_context_radius)
   if not sel then
     logger.error("edit", "Failed to get selection: " .. err)
     vim.notify("[nvim-redraft] " .. err, vim.log.levels.ERROR)
@@ -307,13 +326,16 @@ function M.edit()
     op = "edit",
     bufnr = bufnr,
     code = sel.text,
+    selection_context = sel.context_text,
     system_prompt = get_edit_system_prompt(),
     log_details = string.format(
-      "Selection details: lines %d-%d, cols %d-%d",
+      "Selection details: lines %d-%d, cols %d-%d, context lines %d-%d",
       sel.start_line,
       sel.end_line,
       sel.start_col,
-      sel.end_col
+      sel.end_col,
+      sel.context_start_line or sel.start_line,
+      sel.context_end_line or sel.end_line
     ),
     spinner_message = "Processing edit...",
     success_message = "[nvim-redraft] Edit applied",
