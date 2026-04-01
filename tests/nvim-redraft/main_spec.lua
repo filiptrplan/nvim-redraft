@@ -106,6 +106,83 @@ describe("nvim-redraft", function()
     assert.equals("refactor this using", captured_request.instruction)
     assert.equals(1, #captured_request.contextFiles)
     assert.equals("helper.lua", captured_request.contextFiles[1].path)
+    assert.is_true(captured_request.systemPrompt:find("Direct-apply mode is enabled for selection edits.", 1, true) ~= nil)
+    assert.is_true(captured_request.systemPrompt:find("Do not return a diff, patch, conflict markers", 1, true) ~= nil)
+  end)
+
+  it("adds diff-mode-specific output instructions for selection edits", function()
+    local captured_request
+
+    with_stubbed_modules({
+      ["nvim-redraft.selection"] = {
+        get_visual_selection = function()
+          return {
+            text = "local x = 1",
+            start_line = 1,
+            end_line = 1,
+            start_col = 0,
+            end_col = 10,
+          }
+        end,
+      },
+      ["nvim-redraft.input"] = {
+        get_instruction = function(_, callback)
+          callback("rewrite this")
+        end,
+      },
+      ["nvim-redraft.ipc"] = {
+        config = {},
+        send_request = function(params, callback)
+          captured_request = params
+          callback("updated", nil)
+        end,
+        stop_service = function() end,
+      },
+      ["nvim-redraft.replace"] = {
+        replace_selection = function() end,
+      },
+      ["nvim-redraft.logger"] = {
+        init = function() end,
+        info = function() end,
+        debug = function() end,
+        error = function() end,
+        warn = function() end,
+      },
+      ["nvim-redraft.spinner"] = {
+        start = function() end,
+        stop = function() end,
+      },
+      ["nvim-redraft.model_selector"] = {
+        get_model_selection = function() end,
+      },
+      ["nvim-redraft.diff"] = {
+        inject_conflict_markers = function() end,
+      },
+      ["nvim-redraft.mentions"] = {
+        parse = function(instruction)
+          return {
+            instruction = instruction,
+            context_files = {},
+            skipped_mentions = {},
+          }
+        end,
+        get_workspace_root = function()
+          return vim.fn.getcwd()
+        end,
+      },
+    }, function()
+      local redraft = dofile(repo_root .. "/lua/nvim-redraft.lua")
+      redraft.config.llm.models = {
+        { provider = "openai", model = "gpt-4o-mini" },
+      }
+      redraft.config.llm.current_index = 1
+      redraft.config.diff_mode = true
+      redraft.edit()
+    end)
+
+    assert.is_not_nil(captured_request)
+    assert.is_true(captured_request.systemPrompt:find("Diff mode is enabled for selection edits.", 1, true) ~= nil)
+    assert.is_true(captured_request.systemPrompt:find("Do not return conflict markers, a unified diff, a patch", 1, true) ~= nil)
   end)
 
   it("sends cursor context and inserts directly in normal mode", function()
