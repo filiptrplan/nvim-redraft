@@ -139,4 +139,39 @@ describe("replace", function()
       assert.equals("", lines[2])
     end)
   end)
+
+  describe("insert_at_cursor", function()
+    it("should insert text at the start of a line", function()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { "world" })
+
+      replace.insert_at_cursor({ bufnr = 0, line = 1, col = 0 }, "hello ")
+
+      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      assert.same({ "hello world" }, lines)
+      assert.same({ 1, 6 }, cursor)
+    end)
+
+    it("should insert text in the middle of a line", function()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { "return value" })
+
+      replace.insert_at_cursor({ bufnr = 0, line = 1, col = 7 }, "new_")
+
+      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      assert.same({ "return new_value" }, lines)
+      assert.same({ 1, 11 }, cursor)
+    end)
+
+    it("should insert multi-line text and move cursor to the end", function()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { "function test() end" })
+
+      replace.insert_at_cursor({ bufnr = 0, line = 1, col = 15 }, "\n  print('hi')\n")
+
+      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      assert.same({ "function test()", "  print('hi')", " end" }, lines)
+      assert.same({ 3, 0 }, cursor)
+    end)
+  end)
 end)

@@ -123,4 +123,42 @@ describe("selection", function()
       assert.equals(3, result.end_line)
     end)
   end)
+
+  describe("get_cursor_context", function()
+    it("should insert the cursor marker at the current column", function()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { "local value = 1" })
+      vim.api.nvim_win_set_cursor(0, { 1, 6 })
+
+      local result = selection.get_cursor_context(30)
+
+      assert.is_not_nil(result)
+      assert.equals("local " .. selection.CURSOR_MARKER .. "value = 1", result.text)
+      assert.equals(1, result.cursor_line)
+      assert.equals(6, result.cursor_col)
+    end)
+
+    it("should clip the context window at the top of the buffer", function()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { "one", "two", "three", "four" })
+      vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+      local result = selection.get_cursor_context(2)
+
+      assert.is_not_nil(result)
+      assert.equals(1, result.start_line)
+      assert.equals(3, result.end_line)
+      assert.equals(selection.CURSOR_MARKER .. "one\ntwo\nthree", result.text)
+    end)
+
+    it("should clip the context window at the bottom of the buffer", function()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { "one", "two", "three", "four" })
+      vim.api.nvim_win_set_cursor(0, { 4, 3 })
+
+      local result = selection.get_cursor_context(2)
+
+      assert.is_not_nil(result)
+      assert.equals(2, result.start_line)
+      assert.equals(4, result.end_line)
+      assert.equals("two\nthree\nfou" .. selection.CURSOR_MARKER .. "r", result.text)
+    end)
+  end)
 end)

@@ -10,6 +10,13 @@ local mentions = require("nvim-redraft.mentions")
 
 local M = {}
 
+local INSERT_SYSTEM_PROMPT_SUFFIX = [[
+
+For insertion requests, the provided code is surrounding context and contains the marker __NVIM_REDRAFT_CURSOR__ at the exact insertion point.
+Return ONLY the code that should be inserted at that marker.
+Do not repeat the surrounding context.
+Do not include the marker in your response.]]
+
 M.config = {
   system_prompt = [[You are a code editing assistant. Analyze the user's instruction and the selected code to determine the appropriate action.
 
@@ -36,6 +43,14 @@ If additional file context is provided, use it only as reference material. Retur
       end,
       mode = "v",
       desc = "AI Edit Selection",
+    },
+    {
+      "<leader>ai",
+      function()
+        require("nvim-redraft").insert()
+      end,
+      mode = "n",
+      desc = "AI Insert At Cursor",
     },
     {
       "<leader>am",
@@ -190,60 +205,46 @@ function M.select_model()
   end)
 end
 
-function M.edit()
+local function run_request(opts)
   local start_time = vim.loop.hrtime()
-  logger.info("edit", "Edit operation started")
+  local op = opts.op or "edit"
+  local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
 
-  vim.cmd('normal! "vy')
-  local sel, err = selection.get_visual_selection()
-  if not sel then
-    logger.error("edit", "Failed to get selection: " .. err)
-    vim.notify("[nvim-redraft] " .. err, vim.log.levels.ERROR)
-    return
-  end
-
-  local bufnr = vim.api.nvim_get_current_buf()
+  logger.info(op, string.format("%s operation started", op:gsub("^%l", string.upper)))
 
   input.get_instruction(M.config, function(instruction)
     local mention_result = mentions.parse(instruction, {
       workspace_root = mentions.get_workspace_root(),
     })
 
-    logger.debug("edit", "User instruction: " .. instruction)
-    logger.debug("edit", "Resolved instruction: " .. mention_result.instruction)
-    logger.debug("edit", "Selected code:", sel.text)
-    logger.debug(
-      "edit",
-      string.format(
-        "Selection details: lines %d-%d, cols %d-%d",
-        sel.start_line,
-        sel.end_line,
-        sel.start_col,
-        sel.end_col
-      )
-    )
-    logger.debug("edit", "System prompt:", M.config.system_prompt)
+    logger.debug(op, "User instruction: " .. instruction)
+    logger.debug(op, "Resolved instruction: " .. mention_result.instruction)
+    logger.debug(op, "Selected code:", opts.code)
+
+    if opts.log_details then
+      logger.debug(op, opts.log_details)
+    end
 
     if #mention_result.context_files > 0 then
-      logger.debug("edit", "Mentioned files:", vim.inspect(mention_result.context_files))
+      logger.debug(op, "Mentioned files:", vim.inspect(mention_result.context_files))
     end
 
     if #mention_result.skipped_mentions > 0 then
-      logger.debug("edit", "Skipped mentions:", table.concat(mention_result.skipped_mentions, ", "))
+      logger.debug(op, "Skipped mentions:", table.concat(mention_result.skipped_mentions, ", "))
     end
 
     local current_model = M.config.llm.models[M.config.llm.current_index]
     logger.debug(
-      "edit",
+      op,
       string.format("Using model: %s (provider: %s)", current_model.model or "default", current_model.provider)
     )
 
-    spinner.start("Processing edit...")
+    spinner.start(opts.spinner_message or "Processing edit...")
 
     ipc.send_request({
-      code = sel.text,
+      code = opts.code,
       instruction = mention_result.instruction,
-      systemPrompt = M.config.system_prompt,
+      systemPrompt = opts.system_prompt or M.config.system_prompt,
       provider = current_model.provider,
       model = current_model.model,
       baseURL = M.config.llm.base_url,
@@ -254,25 +255,86 @@ function M.edit()
 
       if error then
         local elapsed = (vim.loop.hrtime() - start_time) / 1e9
-        logger.error("edit", string.format("Edit failed after %.2fs: %s", elapsed, error))
+        logger.error(op, string.format("%s failed after %.2fs: %s", op:gsub("^%l", string.upper), elapsed, error))
         vim.notify("[nvim-redraft] " .. error, vim.log.levels.ERROR)
         return
       end
 
-      logger.debug("edit", "Final result:", result)
+      logger.debug(op, "Final result:", result)
 
-      if M.config.diff_mode then
-        diff.inject_conflict_markers(bufnr, sel, result)
-        local elapsed = (vim.loop.hrtime() - start_time) / 1e9
-        logger.info("edit", string.format("Diff injected in %.2fs - awaiting resolution", elapsed))
-      else
-        replace.replace_selection(sel, result)
-        local elapsed = (vim.loop.hrtime() - start_time) / 1e9
-        logger.info("edit", string.format("Edit completed successfully in %.2fs", elapsed))
-        vim.notify("[nvim-redraft] Edit applied", vim.log.levels.INFO)
-      end
+      opts.apply_result(result, bufnr)
+
+      local elapsed = (vim.loop.hrtime() - start_time) / 1e9
+      logger.info(op, string.format("%s completed successfully in %.2fs", op:gsub("^%l", string.upper), elapsed))
+      vim.notify(opts.success_message or "[nvim-redraft] Edit applied", vim.log.levels.INFO)
     end)
   end)
+end
+
+function M.edit()
+  vim.cmd('normal! "vy')
+  local sel, err = selection.get_visual_selection()
+  if not sel then
+    logger.error("edit", "Failed to get selection: " .. err)
+    vim.notify("[nvim-redraft] " .. err, vim.log.levels.ERROR)
+    return
+  end
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  run_request({
+    op = "edit",
+    bufnr = bufnr,
+    code = sel.text,
+    log_details = string.format(
+      "Selection details: lines %d-%d, cols %d-%d",
+      sel.start_line,
+      sel.end_line,
+      sel.start_col,
+      sel.end_col
+    ),
+    spinner_message = "Processing edit...",
+    success_message = "[nvim-redraft] Edit applied",
+    apply_result = function(result, target_bufnr)
+      if M.config.diff_mode then
+        diff.inject_conflict_markers(target_bufnr, sel, result)
+        return
+      end
+
+      replace.replace_selection(sel, result, target_bufnr)
+    end,
+  })
+end
+
+function M.insert()
+  local context, err = selection.get_cursor_context(30)
+  if not context then
+    logger.error("insert", "Failed to get cursor context: " .. err)
+    vim.notify("[nvim-redraft] " .. err, vim.log.levels.ERROR)
+    return
+  end
+
+  run_request({
+    op = "insert",
+    bufnr = context.bufnr,
+    code = context.text,
+    system_prompt = M.config.system_prompt .. INSERT_SYSTEM_PROMPT_SUFFIX,
+    log_details = string.format(
+      "Cursor context details: lines %d-%d around %d:%d",
+      context.start_line,
+      context.end_line,
+      context.cursor_line,
+      context.cursor_col
+    ),
+    spinner_message = "Processing insert...",
+    success_message = "[nvim-redraft] Insert applied",
+    apply_result = function(result)
+      replace.insert_at_cursor({
+        bufnr = context.bufnr,
+        line = context.cursor_line,
+        col = context.cursor_col,
+      }, result)
+    end,
+  })
 end
 
 M.diff = diff
