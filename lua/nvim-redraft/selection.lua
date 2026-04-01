@@ -2,6 +2,8 @@ local logger = require("nvim-redraft.logger")
 
 local M = {}
 
+M.CURSOR_MARKER = "__NVIM_REDRAFT_CURSOR__"
+
 function M.get_visual_selection()
   local start_pos = vim.fn.getpos("'<")
   local end_pos = vim.fn.getpos("'>")
@@ -48,6 +50,57 @@ function M.get_visual_selection()
   logger.debug(
     "selection",
     string.format("Extracted selection: %d chars, lines %d-%d", #result.text, start_line, end_line)
+  )
+
+  return result
+end
+
+function M.get_cursor_context(radius)
+  radius = radius or 30
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local cursor_line = cursor[1]
+  local cursor_col = cursor[2]
+  local total_lines = vim.api.nvim_buf_line_count(bufnr)
+
+  if total_lines == 0 then
+    logger.warn("selection", "Cannot capture cursor context from an empty buffer")
+    return nil, "Empty buffer"
+  end
+
+  local start_line = math.max(1, cursor_line - radius)
+  local end_line = math.min(total_lines, cursor_line + radius)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
+
+  if #lines == 0 then
+    logger.warn("selection", "Empty cursor context")
+    return nil, "Empty cursor context"
+  end
+
+  local relative_cursor_line = cursor_line - start_line + 1
+  local current_line = lines[relative_cursor_line] or ""
+  lines[relative_cursor_line] = current_line:sub(1, cursor_col) .. M.CURSOR_MARKER .. current_line:sub(cursor_col + 1)
+
+  local result = {
+    bufnr = bufnr,
+    text = table.concat(lines, "\n"),
+    start_line = start_line,
+    end_line = end_line,
+    cursor_line = cursor_line,
+    cursor_col = cursor_col,
+    marker = M.CURSOR_MARKER,
+  }
+
+  logger.debug(
+    "selection",
+    string.format(
+      "Extracted cursor context: lines %d-%d around %d:%d",
+      start_line,
+      end_line,
+      cursor_line,
+      cursor_col
+    )
   )
 
   return result

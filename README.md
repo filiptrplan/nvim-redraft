@@ -9,6 +9,7 @@ https://github.com/user-attachments/assets/4124e8e5-27ce-4628-b005-e0d7b65a1392
 ## Features
 
 - Select code in visual mode and apply AI edits inline
+- Insert AI-generated code at the cursor from normal mode
 - No confirmation dialogs - seamless editing experience
 - Switch between multiple LLM providers and models on the fly
 - Customizable system prompts and keybindings
@@ -110,6 +111,13 @@ export CEREBRAS_API_KEY="your-cerebras-api-key"
 2. Select code in visual mode (`v`, `V`, or `Ctrl-v`)
 3. Press `<leader>ae` and enter your instruction
 4. The AI applies changes inline
+
+Or from normal mode:
+
+1. Place the cursor where you want new code inserted
+2. Press `<leader>ai` or run `:RedraftInsert`
+3. Enter your instruction
+4. The AI inserts generated code at the saved cursor position using nearby lines as context
 
 You can mention extra files in the instruction with `@path/to/file` or include the current buffer with `@buffer`. Quoted paths such as `@"docs/my file.md"` are supported. Invalid mentions are ignored. When `Snacks.nvim` is available, typing `@` opens a file picker for quick insertion.
 
@@ -223,6 +231,7 @@ The plugin automatically extracts your Copilot OAuth token from `~/.config/githu
 require("nvim-redraft").setup({
   keys = {
     { "<leader>ae", function() require("nvim-redraft").edit() end, mode = "v", desc = "AI Edit Selection" },
+    { "<leader>ai", function() require("nvim-redraft").insert() end, mode = "n", desc = "AI Insert At Cursor" },
     { "<leader>am", function() require("nvim-redraft").select_model() end, desc = "Select AI Model" },
   },
 })
@@ -238,11 +247,15 @@ require("nvim-redraft").setup({
 vim.keymap.set("v", "<C-a>", function()
   require("nvim-redraft").edit()
 end, { desc = "AI Edit Selection" })
+
+vim.keymap.set("n", "<leader>gi", function()
+  require("nvim-redraft").insert()
+end, { desc = "AI Insert At Cursor" })
 ```
 
 ### Diff Mode
 
-By default, AI edits are applied directly to your code. Enable `diff_mode` to review changes as git-style conflict markers first:
+By default, AI edits are applied directly to your code. Enable `diff_mode` to review visual-selection edits as git-style conflict markers first:
 
 ```lua
 require("nvim-redraft").setup({
@@ -305,6 +318,8 @@ The plugin creates two highlight groups (`NvimRedraftCurrent` and `NvimRedraftIn
 vim.api.nvim_set_hl(0, "NvimRedraftCurrent", { bg = "#3c3836" })
 vim.api.nvim_set_hl(0, "NvimRedraftIncoming", { bg = "#3c5c3c" })
 ```
+
+Normal-mode inserts triggered with `<leader>ai` or `:RedraftInsert` always apply directly at the cursor, even when `diff_mode = true`.
 
 ### All Options
 
