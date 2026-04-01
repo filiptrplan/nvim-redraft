@@ -17,6 +17,20 @@ Return ONLY the code that should be inserted at that marker.
 Do not repeat the surrounding context.
 Do not include the marker in your response.]]
 
+local DIRECT_APPLY_SYSTEM_PROMPT_SUFFIX = [[
+
+Direct-apply mode is enabled for selection edits.
+Return ONLY the final replacement for the selected code.
+Do not return a diff, patch, conflict markers, before/after comparison, or instructions.
+Do not include line numbers, fences, or commentary.]]
+
+local DIFF_MODE_SYSTEM_PROMPT_SUFFIX = [[
+
+Diff mode is enabled for selection edits.
+Return ONLY the edited version of the selected code.
+Do not return conflict markers, a unified diff, a patch, or before/after sections.
+The editor will render the diff view separately.]]
+
 M.config = {
   system_prompt = [[You are a code editing assistant. Analyze the user's instruction and the selected code to determine the appropriate action.
 
@@ -205,6 +219,14 @@ function M.select_model()
   end)
 end
 
+local function get_edit_system_prompt()
+  if M.config.diff_mode then
+    return M.config.system_prompt .. DIFF_MODE_SYSTEM_PROMPT_SUFFIX
+  end
+
+  return M.config.system_prompt .. DIRECT_APPLY_SYSTEM_PROMPT_SUFFIX
+end
+
 local function run_request(opts)
   local start_time = vim.loop.hrtime()
   local op = opts.op or "edit"
@@ -285,6 +307,7 @@ function M.edit()
     op = "edit",
     bufnr = bufnr,
     code = sel.text,
+    system_prompt = get_edit_system_prompt(),
     log_details = string.format(
       "Selection details: lines %d-%d, cols %d-%d",
       sel.start_line,
