@@ -3,8 +3,45 @@ local logger = require("nvim-redraft.logger")
 local M = {}
 
 M.CURSOR_MARKER = "__NVIM_REDRAFT_CURSOR__"
+M.SELECTION_START_MARKER = "__NVIM_REDRAFT_SELECTION_START__"
+M.SELECTION_END_MARKER = "__NVIM_REDRAFT_SELECTION_END__"
 
-function M.get_visual_selection()
+local function insert_marker(line, marker, col)
+  return line:sub(1, col - 1) .. marker .. line:sub(col)
+end
+
+local function build_selection_context(bufnr, start_line, end_line, start_col, end_col, mode, radius)
+  local total_lines = vim.api.nvim_buf_line_count(bufnr)
+  local context_start_line = math.max(1, start_line - radius)
+  local context_end_line = math.min(total_lines, end_line + radius)
+  local context_lines = vim.api.nvim_buf_get_lines(bufnr, context_start_line - 1, context_end_line, false)
+
+  if #context_lines == 0 then
+    return nil
+  end
+
+  local relative_start_line = start_line - context_start_line + 1
+  local relative_end_line = end_line - context_start_line + 1
+
+  if mode == "V" then
+    context_lines[relative_end_line] = context_lines[relative_end_line] .. M.SELECTION_END_MARKER
+    context_lines[relative_start_line] = M.SELECTION_START_MARKER .. context_lines[relative_start_line]
+  elseif relative_start_line == relative_end_line then
+    context_lines[relative_start_line] = insert_marker(context_lines[relative_start_line], M.SELECTION_END_MARKER, end_col + 1)
+    context_lines[relative_start_line] = insert_marker(context_lines[relative_start_line], M.SELECTION_START_MARKER, start_col)
+  else
+    context_lines[relative_end_line] = insert_marker(context_lines[relative_end_line], M.SELECTION_END_MARKER, end_col + 1)
+    context_lines[relative_start_line] = insert_marker(context_lines[relative_start_line], M.SELECTION_START_MARKER, start_col)
+  end
+
+  return {
+    text = table.concat(context_lines, "\n"),
+    start_line = context_start_line,
+    end_line = context_end_line,
+  }
+end
+
+function M.get_visual_selection(radius)
   local start_pos = vim.fn.getpos("'<")
   local end_pos = vim.fn.getpos("'>")
 
@@ -46,6 +83,13 @@ function M.get_visual_selection()
     start_col = start_col,
     end_col = end_col,
   }
+
+  local context = build_selection_context(0, start_line, end_line, start_col, end_col, mode, radius or 30)
+  if context then
+    result.context_text = context.text
+    result.context_start_line = context.start_line
+    result.context_end_line = context.end_line
+  end
 
   logger.debug(
     "selection",

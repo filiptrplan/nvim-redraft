@@ -24,6 +24,7 @@ export interface EditRequest {
   code: string;
   instruction: string;
   systemPrompt?: string;
+  selectionContext?: string;
   contextFiles?: ContextFile[];
 }
 
@@ -46,6 +47,7 @@ export interface LLMProvider {
     code: string,
     instruction: string,
     systemPrompt?: string,
+    selectionContext?: string,
     contextFiles?: ContextFile[],
   ): Promise<string>;
 }
@@ -128,8 +130,18 @@ abstract class BaseLLMProvider implements LLMProvider {
     return resolved;
   }
 
-  protected buildUserMessage(code: string, instruction: string, contextFiles: ContextFile[] = []): string {
+  protected buildUserMessage(
+    code: string,
+    instruction: string,
+    selectionContext?: string,
+    contextFiles: ContextFile[] = [],
+  ): string {
     const sections = [`Instruction:\n${instruction}`, `Selected code:\n${code}`];
+
+    if (selectionContext) {
+      sections.push(`Surrounding selection context:\n${selectionContext}`);
+    }
+
     const loadedContextFiles = this.loadContextFiles(contextFiles);
 
     if (loadedContextFiles.length > 0) {
@@ -146,6 +158,7 @@ abstract class BaseLLMProvider implements LLMProvider {
     code: string,
     instruction: string,
     systemPrompt?: string,
+    selectionContext?: string,
     contextFiles?: ContextFile[],
   ): Promise<string> {
     logger.debug('apply-edit', `Calling ${this.model} for edit`);
@@ -157,7 +170,7 @@ abstract class BaseLLMProvider implements LLMProvider {
     const provider = this.createProviderInstance();
 
     const options = this.getGenerateTextOptions('apply', systemPrompt);
-    const userMessage = this.buildUserMessage(code, instruction, contextFiles);
+    const userMessage = this.buildUserMessage(code, instruction, selectionContext, contextFiles);
 
     const result = await generateText({
       model: provider(this.model),
@@ -205,6 +218,7 @@ abstract class OpenAICompatibleProvider extends BaseLLMProvider {
     code: string,
     instruction: string,
     systemPrompt?: string,
+    selectionContext?: string,
     contextFiles?: ContextFile[],
   ): Promise<string> {
     logger.debug('apply-edit', `Calling ${this.model} for edit`);
@@ -220,7 +234,7 @@ abstract class OpenAICompatibleProvider extends BaseLLMProvider {
       },
       {
         role: 'user',
-        content: this.buildUserMessage(code, instruction, contextFiles),
+        content: this.buildUserMessage(code, instruction, selectionContext, contextFiles),
       },
     ];
 
@@ -463,6 +477,7 @@ class AnthropicProvider extends BaseLLMProvider {
     code: string,
     instruction: string,
     systemPrompt?: string,
+    selectionContext?: string,
     contextFiles?: ContextFile[],
   ): Promise<string> {
     logger.debug('apply-edit', `Calling ${this.model} for edit`);
@@ -481,7 +496,7 @@ class AnthropicProvider extends BaseLLMProvider {
       messages: [
         {
           role: 'user',
-          content: this.buildUserMessage(code, instruction, contextFiles),
+          content: this.buildUserMessage(code, instruction, selectionContext, contextFiles),
         },
       ],
     });
@@ -642,13 +657,13 @@ export class LLMService {
   }
 
   async edit(request: EditRequest): Promise<string> {
-    const { code, instruction, systemPrompt, contextFiles } = request;
+    const { code, instruction, systemPrompt, selectionContext, contextFiles } = request;
 
     logger.debug('llm', 'Starting edit process');
     logger.debug('llm', `Instruction: ${instruction}`);
 
     try {
-      const editedCode = await this.provider.applyEdit(code, instruction, systemPrompt, contextFiles);
+      const editedCode = await this.provider.applyEdit(code, instruction, systemPrompt, selectionContext, contextFiles);
 
       logger.info('llm', 'Edit completed successfully');
       return editedCode;

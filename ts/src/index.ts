@@ -8,11 +8,12 @@ interface JSONRPCRequest {
   params: {
     code: string;
     instruction: string;
-      systemPrompt?: string;
-      contextFiles?: ContextFile[];
-      provider?: string;
-      model?: string;
-      baseURL?: string;
+    systemPrompt?: string;
+    selectionContext?: string;
+    contextFiles?: ContextFile[];
+    provider?: string;
+    model?: string;
+    baseURL?: string;
     maxOutputTokens?: number;
   };
 }
@@ -100,6 +101,7 @@ class JSONRPCServer {
         code: request.params.code,
         instruction: request.params.instruction,
         systemPrompt: request.params.systemPrompt,
+        selectionContext: request.params.selectionContext,
         contextFiles: request.params.contextFiles,
       });
 

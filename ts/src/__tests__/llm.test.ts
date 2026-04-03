@@ -171,6 +171,7 @@ describe('LLM Provider System', () => {
         'const x = 1;',
         'use helper',
         undefined,
+        undefined,
         [{ path: 'helper.ts', absolutePath: '/tmp/helper.ts' }],
       );
     });
@@ -270,7 +271,7 @@ describe('Context file prompts', () => {
     mockFs.statSync.mockReturnValue({ isFile: () => true, size: 24 } as any);
     mockFs.readFileSync.mockReturnValue('export const helper = true;');
 
-    const message = provider.buildUserMessage('const x = 1;', 'use helper', [
+    const message = provider.buildUserMessage('const x = 1;', 'use helper', undefined, [
       { path: 'src/helper.ts', absolutePath: '/tmp/src/helper.ts' },
     ]);
 
@@ -278,6 +279,20 @@ describe('Context file prompts', () => {
     expect(message).toContain('Selected code:\nconst x = 1;');
     expect(message).toContain('Additional file context:');
     expect(message).toContain('File: src/helper.ts\nexport const helper = true;');
+  });
+
+  it('should append surrounding selection context to the user message', () => {
+    const provider = createProvider('openai', 'test-key', 'gpt-4o-mini') as any;
+
+    const message = provider.buildUserMessage(
+      'const x = 1;',
+      'use helper',
+      'before\n__NVIM_REDRAFT_SELECTION_START__const x = 1;__NVIM_REDRAFT_SELECTION_END__\nafter',
+    );
+
+    expect(message).toContain('Selected code:\nconst x = 1;');
+    expect(message).toContain('Surrounding selection context:');
+    expect(message).toContain('__NVIM_REDRAFT_SELECTION_START__const x = 1;__NVIM_REDRAFT_SELECTION_END__');
   });
 
   it('should use inline context file content when provided', () => {

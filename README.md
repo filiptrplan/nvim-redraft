@@ -312,6 +312,16 @@ require("nvim-redraft").setup({
 })
 ```
 
+### Selection Context Radius
+
+Visual edits send 30 lines above and below the selection as reference context by default. You can change that window size with `selection_context_radius`:
+
+```lua
+require("nvim-redraft").setup({
+  selection_context_radius = 12,
+})
+```
+
 The plugin creates two highlight groups (`NvimRedraftCurrent` and `NvimRedraftIncoming`) linked to the configured highlights. Override them directly for custom styling:
 
 ```lua
@@ -335,6 +345,7 @@ Normal-mode inserts triggered with `<leader>ai` or `:RedraftInsert` always apply
     timeout = number,          -- Request timeout in ms (default: 30000)
     max_output_tokens = number,-- Max response tokens (default: 4096)
   },
+  selection_context_radius = number, -- Visual edit context lines above/below selection (default: 30)
   diff_mode = boolean,         -- Show changes as conflict markers (default: false)
   diff = {
     autojump = boolean,        -- Jump to next conflict after resolution (default: true)

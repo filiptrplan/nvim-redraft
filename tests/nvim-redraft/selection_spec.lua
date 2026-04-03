@@ -46,6 +46,14 @@ describe("selection", function()
       assert.equals("worl", result.text)
       assert.equals(1, result.start_line)
       assert.equals(1, result.end_line)
+      assert.equals(
+        "hello "
+          .. selection.SELECTION_START_MARKER
+          .. "worl"
+          .. selection.SELECTION_END_MARKER
+          .. "d foo bar",
+        result.context_text
+      )
     end)
 
     it("should capture character selection across multiple lines", function()
@@ -99,6 +107,10 @@ describe("selection", function()
       assert.equals("line 1\nline 2", result.text)
       assert.equals(1, result.start_line)
       assert.equals(2, result.end_line)
+      assert.equals(
+        selection.SELECTION_START_MARKER .. "line 1\nline 2" .. selection.SELECTION_END_MARKER,
+        result.context_text
+      )
     end)
 
     it("should handle selection with special characters", function()
@@ -121,6 +133,27 @@ describe("selection", function()
       assert.equals("line 3", result.text)
       assert.equals(3, result.start_line)
       assert.equals(3, result.end_line)
+    end)
+
+    it("should include 30 lines of surrounding context by default", function()
+      local lines = {}
+      for i = 1, 70 do
+        lines[i] = string.format("line %d", i)
+      end
+
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+      vim.cmd("normal! 35G0V36G")
+      vim.cmd("normal! \27")
+
+      local result = selection.get_visual_selection()
+      local context_lines = vim.split(result.context_text, "\n", { plain = true })
+
+      assert.is_not_nil(result)
+      assert.equals(5, result.context_start_line)
+      assert.equals(66, result.context_end_line)
+      assert.equals(62, #context_lines)
+      assert.equals(selection.SELECTION_START_MARKER .. "line 35", context_lines[31])
+      assert.equals("line 36" .. selection.SELECTION_END_MARKER, context_lines[32])
     end)
   end)
 

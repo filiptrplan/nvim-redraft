@@ -14,6 +14,10 @@ The system SHALL provide a setup() function accepting user configuration includi
 - **WHEN** user calls setup() or setup({})
 - **THEN** default configuration including default input options is used
 
+#### Scenario: Setup with custom selection context radius
+- **WHEN** user calls setup({ selection_context_radius = 12 })
+- **THEN** visual-selection edits capture up to 12 lines above and 12 lines below the selected range as surrounding context
+
 ### Requirement: System Prompt Configuration
 The system SHALL allow users to override the default system prompt.
 
@@ -69,6 +73,10 @@ The system SHALL validate configuration values and provide helpful errors.
 #### Scenario: Invalid timeout value
 - **WHEN** user sets llm.timeout to non-numeric value
 - **THEN** setup() fails with clear validation error
+
+#### Scenario: Invalid selection context radius
+- **WHEN** user sets `selection_context_radius` to a negative or non-numeric value
+- **THEN** setup() fails with a clear validation error
 
 #### Scenario: Unknown configuration keys
 - **WHEN** user provides unrecognized configuration keys
@@ -164,4 +172,3 @@ The system SHALL provide a configurable keybinding to open the model selector me
 #### Scenario: Disable model selector keybinding
 - **WHEN** user sets `keybindings.select_model` to `false` or `nil`
 - **THEN** no keybinding is registered for the model selector
-
