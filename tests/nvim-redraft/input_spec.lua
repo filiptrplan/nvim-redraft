@@ -222,6 +222,7 @@ describe("input", function()
         picker = {
           pick = function(opts)
             assert.equals("input", opts.focus)
+            assert.is_true(opts.enter)
             opts.confirm({ close = function() end }, { file = "src/helper.lua" })
           end,
         },
@@ -249,9 +250,11 @@ describe("input", function()
         picker = {
           pick = function(opts)
             assert.equals("input", opts.focus)
+            assert.is_true(opts.enter)
             assert.equals(2, #opts.multi)
-            assert.equals("@buffer", opts.multi[1].items[1].text)
-            assert.equals("buffer", opts.multi[1].items[1].mention)
+            local items = opts.multi[1].finder()
+            assert.equals("@buffer", items[1].text)
+            assert.equals("buffer", items[1].mention)
             opts.confirm({ close = function() end }, { mention = "buffer", text = "@buffer" })
           end,
         },

@@ -23,20 +23,33 @@ function M.open_mention_picker(snacks, target)
   local picker_root = mentions.get_picker_root()
   local workspace_root = mentions.get_workspace_root()
   local workspace_prefix = vim.pesc(workspace_root)
+  local restore_buftype
+
+  if target.buf and vim.api.nvim_buf_is_valid(target.buf) and vim.bo[target.buf].buftype == "prompt" then
+    restore_buftype = vim.bo[target.buf].buftype
+    vim.bo[target.buf].buftype = "nofile"
+  end
 
   snacks.picker.pick({
     title = "Mention File",
     focus = "input",
+    enter = true,
+    on_close = function()
+      if restore_buftype and target.buf and vim.api.nvim_buf_is_valid(target.buf) then
+        vim.bo[target.buf].buftype = restore_buftype
+      end
+    end,
     multi = {
       {
-        source = "select",
         title = "Special",
-        items = {
-          {
-            text = "@buffer",
-            mention = "buffer",
-          },
-        },
+        finder = function()
+          return {
+            {
+              text = "@buffer",
+              mention = "buffer",
+            },
+          }
+        end,
         format = "text",
         preview = "none",
       },
