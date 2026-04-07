@@ -114,6 +114,9 @@ Do not edit, rewrite, or return any code outside the selected code.]],
       row = -3,
       col = 0,
     },
+    multiline = {
+      enabled = false,
+    },
   },
   selection_context_radius = 30,
   diff_mode = false,
@@ -151,6 +154,16 @@ function M.setup(opts)
   if opts.selection_context_radius ~= nil then
     if type(opts.selection_context_radius) ~= "number" or opts.selection_context_radius < 0 then
       error("selection_context_radius must be a non-negative number")
+    end
+  end
+
+  if type(opts.input) == "table" and opts.input.multiline ~= nil then
+    if type(opts.input.multiline) ~= "table" then
+      error("input.multiline must be a table")
+    end
+
+    if opts.input.multiline.enabled ~= nil and type(opts.input.multiline.enabled) ~= "boolean" then
+      error("input.multiline.enabled must be a boolean")
     end
   end
 

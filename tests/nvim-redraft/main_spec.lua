@@ -387,6 +387,26 @@ describe("nvim-redraft", function()
     end)
   end)
 
+  it("validates input.multiline.enabled during setup", function()
+    with_stubbed_modules({
+      ["nvim-redraft.selection"] = {},
+      ["nvim-redraft.input"] = {},
+      ["nvim-redraft.ipc"] = { config = {}, stop_service = function() end },
+      ["nvim-redraft.replace"] = {},
+      ["nvim-redraft.logger"] = { init = function() end },
+      ["nvim-redraft.spinner"] = {},
+      ["nvim-redraft.model_selector"] = {},
+      ["nvim-redraft.diff"] = {},
+      ["nvim-redraft.mentions"] = {},
+    }, function()
+      local redraft = dofile(repo_root .. "/lua/nvim-redraft.lua")
+
+      assert.has_error(function()
+        redraft.setup({ input = { multiline = { enabled = "yes" } }, keys = {} })
+      end, "input.multiline.enabled must be a boolean")
+    end)
+  end)
+
   it("sends cursor context and inserts directly in normal mode", function()
     local captured_request
     local inserted_position

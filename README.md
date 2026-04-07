@@ -27,7 +27,7 @@ https://github.com/user-attachments/assets/4124e8e5-27ce-4628-b005-e0d7b65a1392
 - For GitHub Copilot: [copilot.lua](https://github.com/zbirenbaum/copilot.lua) installed and authenticated
 
 **Optional but recommended:**
-- [Snacks.nvim](https://github.com/folke/snacks.nvim) - Enhanced input UI with icons and custom styling. Without it, the plugin uses `vim.ui.input()` for prompts.
+- [Snacks.nvim](https://github.com/folke/snacks.nvim) - Enhanced single-line input UI with icons and custom styling. Without it, the plugin uses `vim.ui.input()` for single-line prompts.
 
 ### lazy.nvim
 
@@ -331,6 +331,26 @@ vim.api.nvim_set_hl(0, "NvimRedraftIncoming", { bg = "#3c5c3c" })
 
 Normal-mode inserts triggered with `<leader>ai` or `:RedraftInsert` always apply directly at the cursor, even when `diff_mode = true`.
 
+### Multiline Input
+
+Enable `input.multiline.enabled` to replace the default single-line prompt with a floating multiline editor:
+
+```lua
+require("nvim-redraft").setup({
+  input = {
+    multiline = {
+      enabled = true,
+    },
+  },
+})
+```
+
+In multiline mode:
+- `Ctrl-S` submits from insert or normal mode
+- `<CR>` submits from normal mode
+- `Esc` cancels
+- `@` mentions still work when [Snacks.nvim](https://github.com/folke/snacks.nvim) is installed with picker support
+
 ### All Options
 
 ```lua
@@ -365,6 +385,9 @@ Normal-mode inserts triggered with `<leader>ai` or `:RedraftInsert` always apply
     prompt = string,           -- Input prompt text (default: "AI Edit: ")
     icon = string,             -- Input icon (default: "󱚣", Snacks.nvim only)
     win = table,               -- Window options (Snacks.nvim only)
+    multiline = {
+      enabled = boolean,       -- Use a floating multiline editor (default: false)
+    },
   },
   debug = boolean,             -- Enable debug logging (default: false)
   log_file = string,           -- Log file path (default: "~/.local/state/nvim/nvim-redraft.log")
@@ -372,7 +395,7 @@ Normal-mode inserts triggered with `<leader>ai` or `:RedraftInsert` always apply
 }
 ```
 
-**Note:** The `input.icon` and `input.win` options only apply when [Snacks.nvim](https://github.com/folke/snacks.nvim) is installed. Without Snacks.nvim, the plugin uses `vim.ui.input()` which displays prompts at the command line with only the `prompt` text.
+**Note:** With `input.multiline.enabled = false`, the plugin uses [Snacks.nvim](https://github.com/folke/snacks.nvim) for the enhanced single-line prompt when available, or `vim.ui.input()` otherwise. The `input.icon` and `input.win` options only apply to that single-line Snacks prompt. With `input.multiline.enabled = true`, the plugin uses its own floating multiline editor, which works without Snacks.nvim.
 
 ## Troubleshooting
 

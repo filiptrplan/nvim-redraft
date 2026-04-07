@@ -2,6 +2,101 @@ local M = {}
 
 local mentions = require("nvim-redraft.mentions")
 
+local function has_nonempty_line(lines)
+  for _, line in ipairs(lines) do
+    if line ~= "" then
+      return true
+    end
+  end
+
+  return false
+end
+
+local function get_multiline_text(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  if not has_nonempty_line(lines) then
+    return nil
+  end
+
+  return table.concat(lines, "\n")
+end
+
+local function close_multiline_input(state)
+  if state.closed then
+    return
+  end
+
+  state.closed = true
+
+  if state.win and vim.api.nvim_win_is_valid(state.win) then
+    vim.api.nvim_win_close(state.win, true)
+  end
+end
+
+local function submit_multiline_input(state)
+  local input = get_multiline_text(state.buf)
+  close_multiline_input(state)
+
+  if input then
+    state.callback(input)
+  end
+end
+
+local function cancel_multiline_input(state)
+  close_multiline_input(state)
+end
+
+local function open_multiline_input(config, callback, snacks)
+  local columns = vim.o.columns
+  local lines = vim.o.lines - vim.o.cmdheight
+  local width = math.min(math.max(columns - 4, 1), math.max(60, math.floor(columns * 0.7)))
+  local height = math.min(math.max(lines - 2, 1), math.max(8, math.floor(lines * 0.3)))
+  local row = math.max(0, math.floor((lines - height) / 2))
+  local col = math.max(0, math.floor((columns - width) / 2))
+  local bufnr = vim.api.nvim_create_buf(false, true)
+
+  vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
+  vim.api.nvim_buf_set_option(bufnr, "bufhidden", "wipe")
+  vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
+
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "" })
+
+  local winid = vim.api.nvim_open_win(bufnr, true, {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+  })
+
+  local state = {
+    buf = bufnr,
+    win = winid,
+    callback = callback,
+    closed = false,
+  }
+
+  vim.keymap.set({ "i", "n" }, "<C-s>", function()
+    submit_multiline_input(state)
+  end, { buffer = bufnr, noremap = true, silent = true })
+
+  vim.keymap.set("n", "<CR>", function()
+    submit_multiline_input(state)
+  end, { buffer = bufnr, noremap = true, silent = true })
+
+  vim.keymap.set({ "i", "n" }, "<Esc>", function()
+    cancel_multiline_input(state)
+  end, { buffer = bufnr, noremap = true, silent = true })
+
+  if snacks and snacks.picker then
+    M.attach_mention_completion(snacks, { buf = bufnr, win = winid })
+  end
+
+  vim.cmd("startinsert")
+end
+
 local function insert_text(winid, bufnr, text)
   if not (winid and vim.api.nvim_win_is_valid(winid)) then
     return
@@ -109,6 +204,11 @@ end
 
 function M.get_instruction(config, callback)
   local ok, snacks = pcall(require, "snacks")
+
+  if config.input.multiline and config.input.multiline.enabled then
+    open_multiline_input(config, callback, ok and snacks or nil)
+    return
+  end
 
   if ok and snacks.input then
     local input_opts = vim.tbl_deep_extend("force", {
