@@ -39,11 +39,14 @@ describe("nvim-redraft", function()
     local captured_request
     local original_cwd = vim.fn.getcwd()
     local temp_dir = vim.fn.tempname()
+    local bufnr = vim.api.nvim_get_current_buf()
+    local original_filetype = vim.bo[bufnr].filetype
 
     vim.fn.mkdir(temp_dir, "p")
     vim.fn.chdir(temp_dir)
     vim.fn.writefile({ "return helper" }, temp_dir .. "/helper.lua")
     vim.api.nvim_buf_set_name(0, temp_dir .. "/current.lua")
+    vim.bo[bufnr].filetype = "lua"
 
     with_stubbed_modules({
       ["nvim-redraft.selection"] = {
@@ -104,6 +107,7 @@ describe("nvim-redraft", function()
     end)
 
     vim.fn.chdir(original_cwd)
+    vim.bo[bufnr].filetype = original_filetype
 
     assert.is_not_nil(captured_request)
     assert.equals("refactor this using", captured_request.instruction)
@@ -113,10 +117,96 @@ describe("nvim-redraft", function()
     )
     assert.equals(1, #captured_request.contextFiles)
     assert.equals("helper.lua", captured_request.contextFiles[1].path)
+    assert.equals("lua", captured_request.filetype)
     assert.is_true(captured_request.systemPrompt:find("Selection edit requests may include surrounding selection context", 1, true) ~= nil)
     assert.is_true(captured_request.systemPrompt:find("The surrounding context is read-only and MUST NOT be edited.", 1, true) ~= nil)
     assert.is_true(captured_request.systemPrompt:find("Direct-apply mode is enabled for selection edits.", 1, true) ~= nil)
     assert.is_true(captured_request.systemPrompt:find("Do not return a diff, patch, conflict markers", 1, true) ~= nil)
+    assert.is_nil(captured_request.systemPrompt:find("When editing Python, preserve syntactic indentation exactly.", 1, true))
+  end)
+
+  it("adds Python-specific indentation guidance for selection edits in Python buffers", function()
+    local captured_request
+    local bufnr = vim.api.nvim_get_current_buf()
+    local original_filetype = vim.bo[bufnr].filetype
+
+    vim.bo[bufnr].filetype = "python"
+
+    with_stubbed_modules({
+      ["nvim-redraft.selection"] = {
+        get_visual_selection = function()
+          return {
+            text = "print('hi')",
+            context_text = "def main():\n    __NVIM_REDRAFT_SELECTION_START__print('hi')__NVIM_REDRAFT_SELECTION_END__",
+            context_start_line = 1,
+            context_end_line = 2,
+            start_line = 2,
+            end_line = 2,
+            start_col = 4,
+            end_col = 15,
+          }
+        end,
+      },
+      ["nvim-redraft.input"] = {
+        get_instruction = function(_, callback)
+          callback("add logging")
+        end,
+      },
+      ["nvim-redraft.ipc"] = {
+        config = {},
+        send_request = function(params, callback)
+          captured_request = params
+          callback("updated", nil)
+        end,
+        stop_service = function() end,
+      },
+      ["nvim-redraft.replace"] = {
+        replace_selection = function() end,
+      },
+      ["nvim-redraft.logger"] = {
+        init = function() end,
+        info = function() end,
+        debug = function() end,
+        error = function() end,
+        warn = function() end,
+      },
+      ["nvim-redraft.spinner"] = {
+        start = function() end,
+        stop = function() end,
+      },
+      ["nvim-redraft.model_selector"] = {
+        get_model_selection = function() end,
+      },
+      ["nvim-redraft.diff"] = {
+        inject_conflict_markers = function() end,
+      },
+      ["nvim-redraft.mentions"] = {
+        parse = function(instruction)
+          return {
+            instruction = instruction,
+            context_files = {},
+            skipped_mentions = {},
+          }
+        end,
+        get_workspace_root = function()
+          return vim.fn.getcwd()
+        end,
+      },
+    }, function()
+      local redraft = dofile(repo_root .. "/lua/nvim-redraft.lua")
+      redraft.config.llm.models = {
+        { provider = "openai", model = "gpt-4o-mini" },
+      }
+      redraft.config.llm.current_index = 1
+      redraft.edit()
+    end)
+
+    vim.bo[bufnr].filetype = original_filetype
+
+    assert.is_not_nil(captured_request)
+    assert.equals("python", captured_request.filetype)
+    assert.is_true(captured_request.systemPrompt:find("When editing Python, preserve syntactic indentation exactly.", 1, true) ~= nil)
+    assert.is_true(captured_request.systemPrompt:find("Use the surrounding code as the source of truth for indentation depth, tabs vs spaces, and block structure.", 1, true) ~= nil)
   end)
 
   it("adds diff-mode-specific output instructions for selection edits", function()
@@ -302,6 +392,10 @@ describe("nvim-redraft", function()
     local inserted_position
     local inserted_text
     local diff_called = false
+    local bufnr = vim.api.nvim_get_current_buf()
+    local original_filetype = vim.bo[bufnr].filetype
+
+    vim.bo[bufnr].filetype = "lua"
 
     with_stubbed_modules({
       ["nvim-redraft.selection"] = {
@@ -310,7 +404,7 @@ describe("nvim-redraft", function()
         end,
         get_cursor_context = function()
           return {
-            bufnr = 4,
+            bufnr = bufnr,
             text = "before\n__NVIM_REDRAFT_CURSOR__after",
             start_line = 5,
             end_line = 6,
@@ -382,11 +476,103 @@ describe("nvim-redraft", function()
       redraft.insert()
     end)
 
+    vim.bo[bufnr].filetype = original_filetype
+
     assert.is_not_nil(captured_request)
+    assert.equals("lua", captured_request.filetype)
     assert.equals("before\n__NVIM_REDRAFT_CURSOR__after", captured_request.code)
     assert.is_true(captured_request.systemPrompt:find("Return ONLY the code that should be inserted", 1, true) ~= nil)
+    assert.is_nil(captured_request.systemPrompt:find("For Python insertions, the indentation of the inserted code MUST match the block indentation at __NVIM_REDRAFT_CURSOR__.", 1, true))
     assert.is_false(diff_called)
-    assert.same({ bufnr = 4, line = 6, col = 2 }, inserted_position)
+    assert.same({ bufnr = bufnr, line = 6, col = 2 }, inserted_position)
     assert.equals("print('hi')", inserted_text)
+  end)
+
+  it("adds Python-specific indentation guidance for insert mode in Python buffers", function()
+    local captured_request
+    local bufnr = vim.api.nvim_get_current_buf()
+    local original_filetype = vim.bo[bufnr].filetype
+
+    vim.bo[bufnr].filetype = "python"
+
+    with_stubbed_modules({
+      ["nvim-redraft.selection"] = {
+        get_visual_selection = function()
+          error("visual selection should not be used")
+        end,
+        get_cursor_context = function()
+          return {
+            bufnr = bufnr,
+            text = "def main():\n    __NVIM_REDRAFT_CURSOR__pass",
+            start_line = 1,
+            end_line = 2,
+            cursor_line = 2,
+            cursor_col = 4,
+          }
+        end,
+      },
+      ["nvim-redraft.input"] = {
+        get_instruction = function(_, callback)
+          callback("add logging")
+        end,
+      },
+      ["nvim-redraft.ipc"] = {
+        config = {},
+        send_request = function(params, callback)
+          captured_request = params
+          callback("print('hi')", nil)
+        end,
+        stop_service = function() end,
+      },
+      ["nvim-redraft.replace"] = {
+        replace_selection = function()
+          error("selection replacement should not be used")
+        end,
+        insert_at_cursor = function() end,
+      },
+      ["nvim-redraft.logger"] = {
+        init = function() end,
+        info = function() end,
+        debug = function() end,
+        error = function() end,
+        warn = function() end,
+      },
+      ["nvim-redraft.spinner"] = {
+        start = function() end,
+        stop = function() end,
+      },
+      ["nvim-redraft.model_selector"] = {
+        get_model_selection = function() end,
+      },
+      ["nvim-redraft.diff"] = {
+        inject_conflict_markers = function() end,
+      },
+      ["nvim-redraft.mentions"] = {
+        parse = function(instruction)
+          return {
+            instruction = instruction,
+            context_files = {},
+            skipped_mentions = {},
+          }
+        end,
+        get_workspace_root = function()
+          return vim.fn.getcwd()
+        end,
+      },
+    }, function()
+      local redraft = dofile(repo_root .. "/lua/nvim-redraft.lua")
+      redraft.config.llm.models = {
+        { provider = "openai", model = "gpt-4o-mini" },
+      }
+      redraft.config.llm.current_index = 1
+      redraft.insert()
+    end)
+
+    vim.bo[bufnr].filetype = original_filetype
+
+    assert.is_not_nil(captured_request)
+    assert.equals("python", captured_request.filetype)
+    assert.is_true(captured_request.systemPrompt:find("When editing Python, preserve syntactic indentation exactly.", 1, true) ~= nil)
+    assert.is_true(captured_request.systemPrompt:find("For Python insertions, the indentation of the inserted code MUST match the block indentation at __NVIM_REDRAFT_CURSOR__.", 1, true) ~= nil)
   end)
 end)

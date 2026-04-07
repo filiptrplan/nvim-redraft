@@ -9,6 +9,7 @@ interface JSONRPCRequest {
     code: string;
     instruction: string;
     systemPrompt?: string;
+    filetype?: string;
     selectionContext?: string;
     contextFiles?: ContextFile[];
     provider?: string;
@@ -101,6 +102,7 @@ class JSONRPCServer {
         code: request.params.code,
         instruction: request.params.instruction,
         systemPrompt: request.params.systemPrompt,
+        filetype: request.params.filetype,
         selectionContext: request.params.selectionContext,
         contextFiles: request.params.contextFiles,
       });

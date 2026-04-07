@@ -2,6 +2,7 @@ import {
   createProvider,
   getApiKey,
   getDefaultModel,
+  getDefaultSystemPrompt,
   LLMService,
   PROVIDER_API_KEYS,
   DEFAULT_MODELS,
@@ -163,6 +164,7 @@ describe('LLM Provider System', () => {
       const result = await service.edit({
         code: 'const x = 1;',
         instruction: 'use helper',
+        filetype: 'python',
         contextFiles: [{ path: 'helper.ts', absolutePath: '/tmp/helper.ts' }],
       });
 
@@ -173,8 +175,20 @@ describe('LLM Provider System', () => {
         undefined,
         undefined,
         [{ path: 'helper.ts', absolutePath: '/tmp/helper.ts' }],
+        'python',
       );
     });
+  });
+});
+
+describe('Default system prompt', () => {
+  it('adds Python indentation guidance only for Python filetypes', () => {
+    expect(getDefaultSystemPrompt('python')).toContain(
+      'When editing Python, preserve syntactic indentation exactly.',
+    );
+    expect(getDefaultSystemPrompt('lua')).not.toContain(
+      'When editing Python, preserve syntactic indentation exactly.',
+    );
   });
 });
 

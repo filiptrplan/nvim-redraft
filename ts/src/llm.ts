@@ -24,6 +24,7 @@ export interface EditRequest {
   code: string;
   instruction: string;
   systemPrompt?: string;
+  filetype?: string;
   selectionContext?: string;
   contextFiles?: ContextFile[];
 }
@@ -32,6 +33,17 @@ export const MAX_CONTEXT_FILE_BYTES = 32768;
 
 const DEFAULT_SYSTEM_PROMPT =
   "You are a code editing assistant. Apply the user's requested changes to the code and return ONLY the modified code. Handle both brief instructions (e.g., 'add error handling') and detailed instructions equally well. Be precise and maintain code quality. Do not include explanations, markdown formatting, or any text before or after the code.";
+
+const PYTHON_SYSTEM_PROMPT_SUFFIX =
+  ' When editing Python, preserve syntactic indentation exactly. Use the surrounding code as the source of truth for indentation depth, tabs vs spaces, and block structure. Do not shift edited lines left or right unless the requested change requires entering or leaving a block. If you add new Python lines, indent them to the same level required by the surrounding block.';
+
+export function getDefaultSystemPrompt(filetype?: string): string {
+  if (filetype === 'python') {
+    return DEFAULT_SYSTEM_PROMPT + PYTHON_SYSTEM_PROMPT_SUFFIX;
+  }
+
+  return DEFAULT_SYSTEM_PROMPT;
+}
 
 /**
  * LLMProvider interface defines the contract that all LLM providers must implement.
@@ -49,6 +61,7 @@ export interface LLMProvider {
     systemPrompt?: string,
     selectionContext?: string,
     contextFiles?: ContextFile[],
+    filetype?: string,
   ): Promise<string>;
 }
 
@@ -160,6 +173,7 @@ abstract class BaseLLMProvider implements LLMProvider {
     systemPrompt?: string,
     selectionContext?: string,
     contextFiles?: ContextFile[],
+    filetype?: string,
   ): Promise<string> {
     logger.debug('apply-edit', `Calling ${this.model} for edit`);
     logger.debug('apply-edit', 'Input code:', code);
@@ -178,7 +192,7 @@ abstract class BaseLLMProvider implements LLMProvider {
       messages: [
         {
           role: 'system',
-          content: systemPrompt || DEFAULT_SYSTEM_PROMPT,
+          content: systemPrompt || getDefaultSystemPrompt(filetype),
         },
         {
           role: 'user',
@@ -220,6 +234,7 @@ abstract class OpenAICompatibleProvider extends BaseLLMProvider {
     systemPrompt?: string,
     selectionContext?: string,
     contextFiles?: ContextFile[],
+    filetype?: string,
   ): Promise<string> {
     logger.debug('apply-edit', `Calling ${this.model} for edit`);
     logger.debug('apply-edit', 'Input code:', code);
@@ -230,7 +245,7 @@ abstract class OpenAICompatibleProvider extends BaseLLMProvider {
     const messages = [
       {
         role: 'system',
-        content: systemPrompt || DEFAULT_SYSTEM_PROMPT,
+        content: systemPrompt || getDefaultSystemPrompt(filetype),
       },
       {
         role: 'user',
@@ -657,13 +672,20 @@ export class LLMService {
   }
 
   async edit(request: EditRequest): Promise<string> {
-    const { code, instruction, systemPrompt, selectionContext, contextFiles } = request;
+    const { code, instruction, systemPrompt, filetype, selectionContext, contextFiles } = request;
 
     logger.debug('llm', 'Starting edit process');
     logger.debug('llm', `Instruction: ${instruction}`);
 
     try {
-      const editedCode = await this.provider.applyEdit(code, instruction, systemPrompt, selectionContext, contextFiles);
+      const editedCode = await this.provider.applyEdit(
+        code,
+        instruction,
+        systemPrompt,
+        selectionContext,
+        contextFiles,
+        filetype,
+      );
 
       logger.info('llm', 'Edit completed successfully');
       return editedCode;

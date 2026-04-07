@@ -31,6 +31,18 @@ Return ONLY the final replacement for the selected code.
 Do not return a diff, patch, conflict markers, before/after comparison, or instructions.
 Do not include line numbers, fences, or commentary.]]
 
+local PYTHON_SYSTEM_PROMPT_SUFFIX = [[
+
+When editing Python, preserve syntactic indentation exactly.
+Use the surrounding code as the source of truth for indentation depth, tabs vs spaces, and block structure.
+Do not shift edited lines left or right unless the requested change requires entering or leaving a block.
+If you add new Python lines, indent them to the same level required by the surrounding block.]]
+
+local PYTHON_INSERT_SYSTEM_PROMPT_SUFFIX = [[
+
+For Python insertions, the indentation of the inserted code MUST match the block indentation at __NVIM_REDRAFT_CURSOR__.
+Return the inserted text already indented correctly relative to the surrounding code.]]
+
 local DIFF_MODE_SYSTEM_PROMPT_SUFFIX = [[
 
 Diff mode is enabled for selection edits.
@@ -235,14 +247,34 @@ function M.select_model()
   end)
 end
 
-local function get_edit_system_prompt()
-  local base_prompt = M.config.system_prompt .. SELECTION_CONTEXT_SYSTEM_PROMPT_SUFFIX
+local function is_python_filetype(filetype)
+  return filetype == "python"
+end
+
+local function get_base_system_prompt(filetype)
+  local prompt = M.config.system_prompt
+  if is_python_filetype(filetype) then
+    prompt = prompt .. PYTHON_SYSTEM_PROMPT_SUFFIX
+  end
+  return prompt
+end
+
+local function get_edit_system_prompt(filetype)
+  local base_prompt = get_base_system_prompt(filetype) .. SELECTION_CONTEXT_SYSTEM_PROMPT_SUFFIX
 
   if M.config.diff_mode then
     return base_prompt .. DIFF_MODE_SYSTEM_PROMPT_SUFFIX
   end
 
   return base_prompt .. DIRECT_APPLY_SYSTEM_PROMPT_SUFFIX
+end
+
+local function get_insert_system_prompt(filetype)
+  local prompt = get_base_system_prompt(filetype) .. INSERT_SYSTEM_PROMPT_SUFFIX
+  if is_python_filetype(filetype) then
+    prompt = prompt .. PYTHON_INSERT_SYSTEM_PROMPT_SUFFIX
+  end
+  return prompt
 end
 
 local function run_request(opts)
@@ -285,6 +317,7 @@ local function run_request(opts)
       code = opts.code,
       instruction = mention_result.instruction,
       systemPrompt = opts.system_prompt or M.config.system_prompt,
+      filetype = opts.filetype,
       provider = current_model.provider,
       model = current_model.model,
       baseURL = M.config.llm.base_url,
@@ -322,12 +355,14 @@ function M.edit()
   end
 
   local bufnr = vim.api.nvim_get_current_buf()
+  local filetype = vim.bo[bufnr].filetype
   run_request({
     op = "edit",
     bufnr = bufnr,
     code = sel.text,
     selection_context = sel.context_text,
-    system_prompt = get_edit_system_prompt(),
+    system_prompt = get_edit_system_prompt(filetype),
+    filetype = filetype,
     log_details = string.format(
       "Selection details: lines %d-%d, cols %d-%d, context lines %d-%d",
       sel.start_line,
@@ -358,11 +393,13 @@ function M.insert()
     return
   end
 
+  local filetype = vim.bo[context.bufnr].filetype
   run_request({
     op = "insert",
     bufnr = context.bufnr,
     code = context.text,
-    system_prompt = M.config.system_prompt .. INSERT_SYSTEM_PROMPT_SUFFIX,
+    system_prompt = get_insert_system_prompt(filetype),
+    filetype = filetype,
     log_details = string.format(
       "Cursor context details: lines %d-%d around %d:%d",
       context.start_line,
