@@ -190,7 +190,7 @@ describe("input", function()
           return { buf = 11, win = 22 }
         end,
         picker = {
-          files = function() end,
+          pick = function() end,
         },
       }
 
@@ -220,7 +220,8 @@ describe("input", function()
 
       local snacks = {
         picker = {
-          files = function(opts)
+          pick = function(opts)
+            assert.equals("input", opts.focus)
             opts.confirm({ close = function() end }, { file = "src/helper.lua" })
           end,
         },
@@ -235,6 +236,34 @@ describe("input", function()
       vim.fn.chdir(original_cwd)
 
       assert.equals("@src/helper.lua", vim.api.nvim_buf_get_lines(current_buf, 0, 1, false)[1])
+    end)
+
+    it("should insert @buffer from the mention picker", function()
+      local current_buf = vim.api.nvim_get_current_buf()
+      local current_win = vim.api.nvim_get_current_win()
+
+      vim.api.nvim_buf_set_lines(current_buf, 0, -1, false, { "@" })
+      vim.api.nvim_win_set_cursor(current_win, { 1, 1 })
+
+      local snacks = {
+        picker = {
+          pick = function(opts)
+            assert.equals("input", opts.focus)
+            assert.equals(2, #opts.multi)
+            assert.equals("@buffer", opts.multi[1].items[1].text)
+            assert.equals("buffer", opts.multi[1].items[1].mention)
+            opts.confirm({ close = function() end }, { mention = "buffer", text = "@buffer" })
+          end,
+        },
+      }
+
+      input.open_mention_picker(snacks, { buf = current_buf, win = current_win })
+
+      vim.wait(1000, function()
+        return vim.api.nvim_buf_get_lines(current_buf, 0, 1, false)[1] == "@buffer"
+      end)
+
+      assert.equals("@buffer", vim.api.nvim_buf_get_lines(current_buf, 0, 1, false)[1])
     end)
   end)
 end)

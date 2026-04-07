@@ -24,29 +24,55 @@ function M.open_mention_picker(snacks, target)
   local workspace_root = mentions.get_workspace_root()
   local workspace_prefix = vim.pesc(workspace_root)
 
-  snacks.picker.files({
-    cwd = picker_root,
+  snacks.picker.pick({
+    title = "Mention File",
+    focus = "input",
+    multi = {
+      {
+        source = "select",
+        title = "Special",
+        items = {
+          {
+            text = "@buffer",
+            mention = "buffer",
+          },
+        },
+        format = "text",
+        preview = "none",
+      },
+      {
+        source = "files",
+        cwd = picker_root,
+      },
+    },
     confirm = function(picker, item)
       picker:close()
       if not item then
         return
       end
 
-      local selected = item.file or item.text
-      if not selected or selected == "" then
-        return
-      end
+      local mention_text
+      if item.mention == "buffer" then
+        mention_text = "buffer"
+      else
+        local selected = item.file or item.text
+        if not selected or selected == "" then
+          return
+        end
 
-      local absolute_path = selected:match("^/") and selected or vim.fn.fnamemodify(picker_root .. "/" .. selected, ":p")
-      local relative_path = vim.fn.fnamemodify(absolute_path, ":.")
-      if (relative_path == absolute_path or relative_path == "") and absolute_path:match("^" .. workspace_prefix .. "/") then
-        relative_path = absolute_path:sub(#workspace_root + 2)
+        local absolute_path = selected:match("^/") and selected or vim.fn.fnamemodify(picker_root .. "/" .. selected, ":p")
+        local relative_path = vim.fn.fnamemodify(absolute_path, ":.")
+        if (relative_path == absolute_path or relative_path == "") and absolute_path:match("^" .. workspace_prefix .. "/") then
+          relative_path = absolute_path:sub(#workspace_root + 2)
+        end
+
+        mention_text = mentions.format_path_for_mention(relative_path):sub(2)
       end
 
       vim.schedule(function()
         if target.win and vim.api.nvim_win_is_valid(target.win) and vim.api.nvim_buf_is_valid(target.buf) then
           vim.api.nvim_set_current_win(target.win)
-          insert_text(target.win, target.buf, relative_path:find(" ") and ('"' .. relative_path .. '"') or relative_path)
+          insert_text(target.win, target.buf, mention_text)
           vim.cmd("startinsert")
         end
       end)
