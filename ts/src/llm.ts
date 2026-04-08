@@ -32,7 +32,7 @@ export interface EditRequest {
 export const MAX_CONTEXT_FILE_BYTES = 32768;
 
 const DEFAULT_SYSTEM_PROMPT =
-  "You are a code editing assistant. Apply the user's requested changes to the code and return ONLY the modified code. Handle both brief instructions (e.g., 'add error handling') and detailed instructions equally well. Be precise and maintain code quality. Do not include explanations, markdown formatting, or any text before or after the code.";
+  "You are a code editing assistant. Apply the user's requested changes to the provided code and return ONLY a single unified diff that applies cleanly to that code. Keep the diff minimal but unambiguous. Do not include explanations, markdown formatting, or any text before or after the diff.";
 
 const PYTHON_SYSTEM_PROMPT_SUFFIX =
   ' When editing Python, preserve syntactic indentation exactly. Use the surrounding code as the source of truth for indentation depth, tabs vs spaces, and block structure. Do not shift edited lines left or right unless the requested change requires entering or leaving a block. If you add new Python lines, indent them to the same level required by the surrounding block.';

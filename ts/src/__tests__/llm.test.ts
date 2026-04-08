@@ -182,6 +182,10 @@ describe('LLM Provider System', () => {
 });
 
 describe('Default system prompt', () => {
+  it('requests unified diff output by default', () => {
+    expect(getDefaultSystemPrompt('lua')).toContain('return ONLY a single unified diff');
+  });
+
   it('adds Python indentation guidance only for Python filetypes', () => {
     expect(getDefaultSystemPrompt('python')).toContain(
       'When editing Python, preserve syntactic indentation exactly.',
@@ -210,6 +214,12 @@ describe('Provider markdown stripping', () => {
       const input = '```typescript\ninterface Foo {}\n```';
       const result = (provider as any).stripMarkdown(input);
       expect(result).toBe('interface Foo {}');
+    });
+
+    it('should preserve unified diff contents inside diff fences', () => {
+      const input = '```diff\n@@ -1 +1 @@\n-const x = 1;\n+const x = 2;\n```';
+      const result = (provider as any).stripMarkdown(input);
+      expect(result).toBe('@@ -1 +1 @@\n-const x = 1;\n+const x = 2;');
     });
 
     it('should handle code without markdown', () => {

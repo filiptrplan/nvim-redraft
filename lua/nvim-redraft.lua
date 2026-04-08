@@ -9,27 +9,28 @@ local diff = require("nvim-redraft.diff")
 local mentions = require("nvim-redraft.mentions")
 
 local M = {}
+local MAX_DIFF_RETRIES = 1
 
 local INSERT_SYSTEM_PROMPT_SUFFIX = [[
 
 For insertion requests, the provided code is surrounding context and contains the marker __NVIM_REDRAFT_CURSOR__ at the exact insertion point.
-Return ONLY the code that should be inserted at that marker.
-Do not repeat the surrounding context.
-Do not include the marker in your response.]]
+Return ONLY a single unified diff against the provided context.
+You MAY modify the surrounding context when the requested change requires it.
+The final patched context MUST remove the cursor marker.
+Do not include commentary, line numbers outside the diff, or instructions.]]
 
 local SELECTION_CONTEXT_SYSTEM_PROMPT_SUFFIX = [[
 
 Selection edit requests may include surrounding selection context marked with __NVIM_REDRAFT_SELECTION_START__ and __NVIM_REDRAFT_SELECTION_END__.
 Use that surrounding context only as reference material.
 The surrounding context is read-only and MUST NOT be edited.
-Return edits for the selected code only, never the extra surrounding context or selection markers.]]
+Return a unified diff for the selected code only, never the extra surrounding context or selection markers.]]
 
 local DIRECT_APPLY_SYSTEM_PROMPT_SUFFIX = [[
 
 Direct-apply mode is enabled for selection edits.
-Return ONLY the final replacement for the selected code.
-Do not return a diff, patch, conflict markers, before/after comparison, or instructions.
-Do not include line numbers, fences, or commentary.]]
+Return ONLY a single unified diff for the selected code.
+Do not include conflict markers, before/after sections, explanations, or instructions.]]
 
 local PYTHON_SYSTEM_PROMPT_SUFFIX = [[
 
@@ -46,9 +47,9 @@ Return the inserted text already indented correctly relative to the surrounding 
 local DIFF_MODE_SYSTEM_PROMPT_SUFFIX = [[
 
 Diff mode is enabled for selection edits.
-Return ONLY the edited version of the selected code.
-Do not return conflict markers, a unified diff, a patch, or before/after sections.
-The editor will render the diff view separately.]]
+Return ONLY a single unified diff for the selected code.
+Do not return conflict markers, before/after sections, explanations, or instructions.
+The editor will render the review view separately after applying the diff.]]
 
 M.config = {
   system_prompt = [[You are a code editing assistant. Analyze the user's instruction and the selected code to determine the appropriate action.
@@ -59,17 +60,17 @@ Based on the instruction, intelligently:
 - DELETE code if the instruction asks to remove, delete, or eliminate specific parts
 - REPLACE code when the instruction implies substitution or complete rewrites
 
-Generate a sparse edit showing only the changes needed:
-- Show only the lines being changed plus minimal context
-- For deletions, show context before and after with the marker, omitting the deleted section
-- Make your edit clear and unambiguous
-- Return ONLY the modified code, no explanations or markdown formatting
+Generate a sparse unified diff showing only the changes needed:
+- Show only the changed lines plus the minimal context needed for the diff to apply cleanly
+- For deletions, include the removed lines in the diff
+- Make the diff clear and unambiguous
+- Return ONLY the unified diff, with no explanations or markdown formatting
 
 Be intelligent about preserving code structure, indentation, and style.
 
 If additional file context is provided, use it only as reference material.
-Return edits for the selected code only.
-Do not edit, rewrite, or return any code outside the selected code.]],
+Return edits for the selected code only unless the request is an insertion context.
+Do not edit, rewrite, or return any code outside the provided code snippet or context.]],
   keys = {
     {
       "<leader>ae",
@@ -290,6 +291,13 @@ local function get_insert_system_prompt(filetype)
   return prompt
 end
 
+local function build_retry_instruction(instruction, normalize_error)
+  return instruction
+    .. "\n\nYour previous response could not be applied because: "
+    .. normalize_error
+    .. "\nReturn ONLY a valid unified diff that applies cleanly to the provided code. Do not include commentary or fences."
+end
+
 local function run_request(opts)
   local start_time = vim.loop.hrtime()
   local op = opts.op or "edit"
@@ -324,37 +332,65 @@ local function run_request(opts)
       string.format("Using model: %s (provider: %s)", current_model.model or "default", current_model.provider)
     )
 
-    spinner.start(opts.spinner_message or "Processing edit...")
+    local function send_request_with_instruction(request_instruction, attempt)
+      ipc.send_request({
+        code = opts.code,
+        instruction = request_instruction,
+        systemPrompt = opts.system_prompt or M.config.system_prompt,
+        filetype = opts.filetype,
+        provider = current_model.provider,
+        model = current_model.model,
+        baseURL = M.config.llm.base_url,
+        maxOutputTokens = M.config.llm.max_output_tokens,
+        selectionContext = opts.selection_context,
+        contextFiles = mention_result.context_files,
+      }, function(result, error)
+        if error then
+          spinner.stop()
+          local elapsed = (vim.loop.hrtime() - start_time) / 1e9
+          logger.error(op, string.format("%s failed after %.2fs: %s", op:gsub("^%l", string.upper), elapsed, error))
+          vim.notify("[nvim-redraft] " .. error, vim.log.levels.ERROR)
+          return
+        end
 
-    ipc.send_request({
-      code = opts.code,
-      instruction = mention_result.instruction,
-      systemPrompt = opts.system_prompt or M.config.system_prompt,
-      filetype = opts.filetype,
-      provider = current_model.provider,
-      model = current_model.model,
-      baseURL = M.config.llm.base_url,
-      maxOutputTokens = M.config.llm.max_output_tokens,
-      selectionContext = opts.selection_context,
-      contextFiles = mention_result.context_files,
-    }, function(result, error)
-      spinner.stop()
+        logger.debug(op, "Final result:", result)
 
-      if error then
+        local normalized_result = result
+        if opts.normalize_result then
+          local normalized, normalize_error = opts.normalize_result(result)
+          if normalize_error then
+            logger.warn(op, string.format("Model diff could not be applied on attempt %d: %s", attempt + 1, normalize_error))
+
+            if attempt < MAX_DIFF_RETRIES then
+              logger.info(op, string.format("Retrying %s with diff feedback", op))
+              send_request_with_instruction(build_retry_instruction(mention_result.instruction, normalize_error), attempt + 1)
+              return
+            end
+
+            spinner.stop()
+            local elapsed = (vim.loop.hrtime() - start_time) / 1e9
+            logger.error(
+              op,
+              string.format("%s failed after %.2fs: %s", op:gsub("^%l", string.upper), elapsed, normalize_error)
+            )
+            vim.notify("[nvim-redraft] " .. normalize_error, vim.log.levels.ERROR)
+            return
+          end
+
+          normalized_result = normalized
+        end
+
+        spinner.stop()
+        opts.apply_result(normalized_result, bufnr)
+
         local elapsed = (vim.loop.hrtime() - start_time) / 1e9
-        logger.error(op, string.format("%s failed after %.2fs: %s", op:gsub("^%l", string.upper), elapsed, error))
-        vim.notify("[nvim-redraft] " .. error, vim.log.levels.ERROR)
-        return
-      end
+        logger.info(op, string.format("%s completed successfully in %.2fs", op:gsub("^%l", string.upper), elapsed))
+        vim.notify(opts.success_message or "[nvim-redraft] Edit applied", vim.log.levels.INFO)
+      end)
+    end
 
-      logger.debug(op, "Final result:", result)
-
-      opts.apply_result(result, bufnr)
-
-      local elapsed = (vim.loop.hrtime() - start_time) / 1e9
-      logger.info(op, string.format("%s completed successfully in %.2fs", op:gsub("^%l", string.upper), elapsed))
-      vim.notify(opts.success_message or "[nvim-redraft] Edit applied", vim.log.levels.INFO)
-    end)
+    spinner.start(opts.spinner_message or "Processing edit...")
+    send_request_with_instruction(mention_result.instruction, 0)
   end)
 end
 
@@ -385,11 +421,14 @@ function M.edit()
       sel.context_start_line or sel.start_line,
       sel.context_end_line or sel.end_line
     ),
-    spinner_message = "Processing edit...",
-    success_message = "[nvim-redraft] Edit applied",
-    apply_result = function(result, target_bufnr)
-      if M.config.diff_mode then
-        diff.inject_conflict_markers(target_bufnr, sel, result)
+     spinner_message = "Processing edit...",
+     success_message = "[nvim-redraft] Edit applied",
+     normalize_result = function(result)
+       return diff.apply_model_diff(sel.text, result)
+     end,
+     apply_result = function(result, target_bufnr)
+       if M.config.diff_mode then
+         diff.inject_conflict_markers(target_bufnr, sel, result)
         return
       end
 
@@ -420,16 +459,23 @@ function M.insert()
       context.cursor_line,
       context.cursor_col
     ),
-    spinner_message = "Processing insert...",
-    success_message = "[nvim-redraft] Insert applied",
-    apply_result = function(result)
-      replace.insert_at_cursor({
-        bufnr = context.bufnr,
-        line = context.cursor_line,
-        col = context.cursor_col,
-      }, result)
-    end,
-  })
+     spinner_message = "Processing insert...",
+     success_message = "[nvim-redraft] Insert applied",
+     normalize_result = function(result)
+       local patched_context, diff_error = diff.apply_model_diff(context.text, result)
+       if not patched_context then
+         return nil, diff_error
+       end
+
+       return diff.extract_insert_result(context.text, patched_context, context.marker)
+     end,
+     apply_result = function(result)
+       replace.replace_range({
+         start_line = context.start_line,
+         end_line = context.end_line,
+       }, result.patched_text, context.bufnr)
+     end,
+   })
 end
 
 M.diff = diff

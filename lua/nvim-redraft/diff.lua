@@ -6,6 +6,7 @@ local NAMESPACE = vim.api.nvim_create_namespace("nvim-redraft-diff")
 local CONFLICT_START = "<<<<<<< Current"
 local CONFLICT_MIDDLE = "======="
 local CONFLICT_END = ">>>>>>> Incoming"
+local CURSOR_MARKER = "__NVIM_REDRAFT_CURSOR__"
 
 local CONFLICT_START_PATTERN = "^<<<<<<< "
 local CONFLICT_MIDDLE_PATTERN = "^=======$"
@@ -51,6 +52,196 @@ local function enable_diagnostics(bufnr)
 end
 
 local autocmd_group = nil
+
+local function split_lines(text)
+  return vim.split(text or "", "\n", { plain = true })
+end
+
+local function strip_diff_fences(text)
+  local trimmed = vim.trim(text or "")
+  if vim.startswith(trimmed, "```diff\n") and vim.endswith(trimmed, "\n```") then
+    return trimmed:sub(8, -5)
+  end
+
+  if vim.startswith(trimmed, "```\n") and vim.endswith(trimmed, "\n```") then
+    return trimmed:sub(5, -5)
+  end
+
+  return trimmed
+end
+
+local function parse_hunk_header(line)
+  local old_start, old_count, new_start, new_count = line:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
+  if not old_start then
+    return nil
+  end
+
+  return {
+    old_start = tonumber(old_start),
+    old_count = old_count == "" and 1 or tonumber(old_count),
+    new_start = tonumber(new_start),
+    new_count = new_count == "" and 1 or tonumber(new_count),
+    lines = {},
+  }
+end
+
+function M.parse_unified_diff(text)
+  local payload = strip_diff_fences(text)
+  local lines = split_lines(payload)
+  local hunks = {}
+  local current_hunk = nil
+  local saw_hunk = false
+  local file_header_count = 0
+
+  for _, line in ipairs(lines) do
+    if line:match("^@@ ") then
+      current_hunk = parse_hunk_header(line)
+      if not current_hunk then
+        return nil, "Invalid unified diff hunk header"
+      end
+      table.insert(hunks, current_hunk)
+      saw_hunk = true
+    elseif current_hunk and line:match("^[ +%-]") then
+      table.insert(current_hunk.lines, line)
+    elseif current_hunk and line == "\\ No newline at end of file" then
+      table.insert(current_hunk.lines, line)
+    elseif line:match("^diff %-%-git ") or line:match("^index ") then
+      if saw_hunk then
+        return nil, "Only a single unified diff is supported"
+      end
+    elseif line:match("^%-%-%- ") or line:match("^%+%+%+ ") then
+      file_header_count = file_header_count + 1
+      if file_header_count > 2 then
+        return nil, "Only a single unified diff is supported"
+      end
+    elseif line == "" and not saw_hunk then
+      -- Allow leading blank lines.
+    else
+      return nil, "Response must be a unified diff only"
+    end
+  end
+
+  if #hunks == 0 then
+    return nil, "Response did not contain any unified diff hunks"
+  end
+
+  return {
+    raw = payload,
+    hunks = hunks,
+  }
+end
+
+function M.apply_unified_diff(original_text, parsed_diff)
+  local original_lines = split_lines(original_text)
+  local result_lines = {}
+  local current_index = 1
+
+  for _, hunk in ipairs(parsed_diff.hunks) do
+    local prefix_end = hunk.old_count == 0 and hunk.old_start or (hunk.old_start - 1)
+
+    if prefix_end >= current_index then
+      for i = current_index, prefix_end do
+        table.insert(result_lines, original_lines[i] or "")
+      end
+    end
+
+    local original_index = prefix_end + 1
+    local consumed_old = 0
+    local produced_new = 0
+
+    for _, hunk_line in ipairs(hunk.lines) do
+      local prefix = hunk_line:sub(1, 1)
+      local content = hunk_line:sub(2)
+
+      if prefix == " " then
+        if original_lines[original_index] ~= content then
+          return nil, string.format("Diff context mismatch at line %d", original_index)
+        end
+        table.insert(result_lines, content)
+        original_index = original_index + 1
+        consumed_old = consumed_old + 1
+        produced_new = produced_new + 1
+      elseif prefix == "-" then
+        if original_lines[original_index] ~= content then
+          return nil, string.format("Diff removal mismatch at line %d", original_index)
+        end
+        original_index = original_index + 1
+        consumed_old = consumed_old + 1
+      elseif prefix == "+" then
+        table.insert(result_lines, content)
+        produced_new = produced_new + 1
+      elseif hunk_line ~= "\\ No newline at end of file" then
+        return nil, "Invalid unified diff hunk body"
+      end
+    end
+
+    if consumed_old ~= hunk.old_count then
+      return nil, string.format("Diff expected %d original lines but consumed %d", hunk.old_count, consumed_old)
+    end
+
+    if produced_new ~= hunk.new_count then
+      return nil, string.format("Diff expected %d new lines but produced %d", hunk.new_count, produced_new)
+    end
+
+    current_index = original_index
+  end
+
+  for i = current_index, #original_lines do
+    table.insert(result_lines, original_lines[i])
+  end
+
+  return table.concat(result_lines, "\n")
+end
+
+function M.apply_model_diff(original_text, response_text)
+  local parsed_diff, parse_err = M.parse_unified_diff(response_text)
+  if not parsed_diff then
+    return nil, parse_err
+  end
+
+  return M.apply_unified_diff(original_text, parsed_diff)
+end
+
+function M.extract_insert_result(original_text, patched_text, marker)
+  marker = marker or CURSOR_MARKER
+
+  local marker_start = original_text:find(marker, 1, true)
+  if not marker_start then
+    return nil, "Cursor marker missing from original insert context"
+  end
+
+  if patched_text:find(marker, 1, true) then
+    return nil, "Patched insert context must remove the cursor marker"
+  end
+
+  local original_prefix = original_text:sub(1, marker_start - 1)
+  local original_suffix = original_text:sub(marker_start + #marker)
+
+  local prefix_len = 0
+  local max_prefix = math.min(#original_prefix, #patched_text)
+  while prefix_len < max_prefix and original_prefix:sub(prefix_len + 1, prefix_len + 1) == patched_text:sub(prefix_len + 1, prefix_len + 1) do
+    prefix_len = prefix_len + 1
+  end
+
+  local suffix_len = 0
+  local max_suffix = math.min(#original_suffix, #patched_text - prefix_len)
+  while suffix_len < max_suffix do
+    local original_char = original_suffix:sub(#original_suffix - suffix_len, #original_suffix - suffix_len)
+    local patched_char = patched_text:sub(#patched_text - suffix_len, #patched_text - suffix_len)
+    if original_char ~= patched_char then
+      break
+    end
+    suffix_len = suffix_len + 1
+  end
+
+  local inserted_end = #patched_text - suffix_len
+  local inserted_text = patched_text:sub(prefix_len + 1, inserted_end)
+
+  return {
+    patched_text = patched_text,
+    inserted_text = inserted_text,
+  }
+end
 
 local function get_config()
   local ok, redraft = pcall(require, "nvim-redraft")

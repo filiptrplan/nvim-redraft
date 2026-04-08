@@ -94,6 +94,9 @@ describe("nvim-redraft", function()
         get_model_selection = function() end,
       },
       ["nvim-redraft.diff"] = {
+        apply_model_diff = function(_, result)
+          return result
+        end,
         inject_conflict_markers = function() end,
       },
       ["nvim-redraft.mentions"] = dofile(repo_root .. "/lua/nvim-redraft/mentions.lua"),
@@ -121,7 +124,7 @@ describe("nvim-redraft", function()
     assert.is_true(captured_request.systemPrompt:find("Selection edit requests may include surrounding selection context", 1, true) ~= nil)
     assert.is_true(captured_request.systemPrompt:find("The surrounding context is read-only and MUST NOT be edited.", 1, true) ~= nil)
     assert.is_true(captured_request.systemPrompt:find("Direct-apply mode is enabled for selection edits.", 1, true) ~= nil)
-    assert.is_true(captured_request.systemPrompt:find("Do not return a diff, patch, conflict markers", 1, true) ~= nil)
+    assert.is_true(captured_request.systemPrompt:find("Return ONLY a single unified diff for the selected code.", 1, true) ~= nil)
     assert.is_nil(captured_request.systemPrompt:find("When editing Python, preserve syntactic indentation exactly.", 1, true))
   end)
 
@@ -178,6 +181,9 @@ describe("nvim-redraft", function()
         get_model_selection = function() end,
       },
       ["nvim-redraft.diff"] = {
+        apply_model_diff = function(_, result)
+          return result
+        end,
         inject_conflict_markers = function() end,
       },
       ["nvim-redraft.mentions"] = {
@@ -258,6 +264,9 @@ describe("nvim-redraft", function()
         get_model_selection = function() end,
       },
       ["nvim-redraft.diff"] = {
+        apply_model_diff = function(_, result)
+          return result
+        end,
         inject_conflict_markers = function() end,
       },
       ["nvim-redraft.mentions"] = {
@@ -284,7 +293,7 @@ describe("nvim-redraft", function()
 
     assert.is_not_nil(captured_request)
     assert.is_true(captured_request.systemPrompt:find("Diff mode is enabled for selection edits.", 1, true) ~= nil)
-    assert.is_true(captured_request.systemPrompt:find("Do not return conflict markers, a unified diff, a patch", 1, true) ~= nil)
+    assert.is_true(captured_request.systemPrompt:find("Return ONLY a single unified diff for the selected code.", 1, true) ~= nil)
   end)
 
   it("uses the configured selection context radius for visual edits", function()
@@ -336,6 +345,9 @@ describe("nvim-redraft", function()
         get_model_selection = function() end,
       },
       ["nvim-redraft.diff"] = {
+        apply_model_diff = function(_, result)
+          return result
+        end,
         inject_conflict_markers = function() end,
       },
       ["nvim-redraft.mentions"] = {
@@ -367,6 +379,96 @@ describe("nvim-redraft", function()
     assert.equals(12, captured_radius)
   end)
 
+  it("retries with parser feedback when a diff response cannot be applied", function()
+    local captured_requests = {}
+    local apply_calls = 0
+    local normalize_calls = 0
+
+    with_stubbed_modules({
+      ["nvim-redraft.selection"] = {
+        get_visual_selection = function()
+          return {
+            text = "local x = 1",
+            context_text = "__NVIM_REDRAFT_SELECTION_START__local x = 1__NVIM_REDRAFT_SELECTION_END__",
+            context_start_line = 1,
+            context_end_line = 1,
+            start_line = 1,
+            end_line = 1,
+            start_col = 0,
+            end_col = 10,
+          }
+        end,
+      },
+      ["nvim-redraft.input"] = {
+        get_instruction = function(_, callback)
+          callback("rewrite this")
+        end,
+      },
+      ["nvim-redraft.ipc"] = {
+        config = {},
+        send_request = function(params, callback)
+          table.insert(captured_requests, params)
+          callback("@@ -1 +1 @@\n-local x = 1\n+local x = 2", nil)
+        end,
+        stop_service = function() end,
+      },
+      ["nvim-redraft.replace"] = {
+        replace_selection = function(_, result)
+          apply_calls = apply_calls + 1
+          assert.equals("local x = 2", result)
+        end,
+      },
+      ["nvim-redraft.logger"] = {
+        init = function() end,
+        info = function() end,
+        debug = function() end,
+        error = function() end,
+        warn = function() end,
+      },
+      ["nvim-redraft.spinner"] = {
+        start = function() end,
+        stop = function() end,
+      },
+      ["nvim-redraft.model_selector"] = {
+        get_model_selection = function() end,
+      },
+      ["nvim-redraft.diff"] = {
+        apply_model_diff = function(_, _)
+          normalize_calls = normalize_calls + 1
+          if normalize_calls == 1 then
+            return nil, "Diff context mismatch at line 1"
+          end
+          return "local x = 2"
+        end,
+        inject_conflict_markers = function() end,
+      },
+      ["nvim-redraft.mentions"] = {
+        parse = function(instruction)
+          return {
+            instruction = instruction,
+            context_files = {},
+            skipped_mentions = {},
+          }
+        end,
+        get_workspace_root = function()
+          return vim.fn.getcwd()
+        end,
+      },
+    }, function()
+      local redraft = dofile(repo_root .. "/lua/nvim-redraft.lua")
+      redraft.config.llm.models = {
+        { provider = "openai", model = "gpt-4o-mini" },
+      }
+      redraft.config.llm.current_index = 1
+      redraft.edit()
+    end)
+
+    assert.equals(2, #captured_requests)
+    assert.equals("rewrite this", captured_requests[1].instruction)
+    assert.is_true(captured_requests[2].instruction:find("Diff context mismatch at line 1", 1, true) ~= nil)
+    assert.equals(1, apply_calls)
+  end)
+
   it("validates selection_context_radius during setup", function()
     with_stubbed_modules({
       ["nvim-redraft.selection"] = {},
@@ -376,7 +478,11 @@ describe("nvim-redraft", function()
       ["nvim-redraft.logger"] = { init = function() end },
       ["nvim-redraft.spinner"] = {},
       ["nvim-redraft.model_selector"] = {},
-      ["nvim-redraft.diff"] = {},
+      ["nvim-redraft.diff"] = {
+        apply_model_diff = function(_, result)
+          return result
+        end,
+      },
       ["nvim-redraft.mentions"] = {},
     }, function()
       local redraft = dofile(repo_root .. "/lua/nvim-redraft.lua")
@@ -407,10 +513,10 @@ describe("nvim-redraft", function()
     end)
   end)
 
-  it("sends cursor context and inserts directly in normal mode", function()
+  it("sends cursor context and applies patched context in normal mode", function()
     local captured_request
-    local inserted_position
-    local inserted_text
+    local replaced_range
+    local replaced_text
     local diff_called = false
     local bufnr = vim.api.nvim_get_current_buf()
     local original_filetype = vim.bo[bufnr].filetype
@@ -442,7 +548,7 @@ describe("nvim-redraft", function()
         config = {},
         send_request = function(params, callback)
           captured_request = params
-          callback("print('hi')", nil)
+          callback("@@ -1,2 +1,3 @@\n before\n-__NVIM_REDRAFT_CURSOR__after\n+print('hi')\n+after", nil)
         end,
         stop_service = function() end,
       },
@@ -450,9 +556,9 @@ describe("nvim-redraft", function()
         replace_selection = function()
           error("selection replacement should not be used")
         end,
-        insert_at_cursor = function(position, text)
-          inserted_position = position
-          inserted_text = text
+        replace_range = function(range, text)
+          replaced_range = range
+          replaced_text = text
         end,
       },
       ["nvim-redraft.logger"] = {
@@ -470,6 +576,12 @@ describe("nvim-redraft", function()
         get_model_selection = function() end,
       },
       ["nvim-redraft.diff"] = {
+        apply_model_diff = function(_, _)
+          return "before\nprint('hi')\nafter"
+        end,
+        extract_insert_result = function(_, patched_text)
+          return { patched_text = patched_text, inserted_text = "print('hi')\n" }
+        end,
         inject_conflict_markers = function()
           diff_called = true
         end,
@@ -501,11 +613,11 @@ describe("nvim-redraft", function()
     assert.is_not_nil(captured_request)
     assert.equals("lua", captured_request.filetype)
     assert.equals("before\n__NVIM_REDRAFT_CURSOR__after", captured_request.code)
-    assert.is_true(captured_request.systemPrompt:find("Return ONLY the code that should be inserted", 1, true) ~= nil)
+    assert.is_true(captured_request.systemPrompt:find("Return ONLY a single unified diff against the provided context.", 1, true) ~= nil)
     assert.is_nil(captured_request.systemPrompt:find("For Python insertions, the indentation of the inserted code MUST match the block indentation at __NVIM_REDRAFT_CURSOR__.", 1, true))
     assert.is_false(diff_called)
-    assert.same({ bufnr = bufnr, line = 6, col = 2 }, inserted_position)
-    assert.equals("print('hi')", inserted_text)
+    assert.same({ start_line = 5, end_line = 6 }, replaced_range)
+    assert.equals("before\nprint('hi')\nafter", replaced_text)
   end)
 
   it("adds Python-specific indentation guidance for insert mode in Python buffers", function()
@@ -540,7 +652,7 @@ describe("nvim-redraft", function()
         config = {},
         send_request = function(params, callback)
           captured_request = params
-          callback("print('hi')", nil)
+          callback("def main():\n    print('hi')\npass", nil)
         end,
         stop_service = function() end,
       },
@@ -548,7 +660,7 @@ describe("nvim-redraft", function()
         replace_selection = function()
           error("selection replacement should not be used")
         end,
-        insert_at_cursor = function() end,
+        replace_range = function() end,
       },
       ["nvim-redraft.logger"] = {
         init = function() end,
@@ -565,6 +677,12 @@ describe("nvim-redraft", function()
         get_model_selection = function() end,
       },
       ["nvim-redraft.diff"] = {
+        apply_model_diff = function(_, result)
+          return result
+        end,
+        extract_insert_result = function(_, patched_text)
+          return { patched_text = patched_text, inserted_text = patched_text }
+        end,
         inject_conflict_markers = function() end,
       },
       ["nvim-redraft.mentions"] = {

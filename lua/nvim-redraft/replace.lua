@@ -49,4 +49,18 @@ function M.insert_at_cursor(position, new_text)
   logger.info("replace", "Code insertion completed")
 end
 
+function M.replace_range(range, new_text, bufnr)
+  bufnr = (bufnr == nil or bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
+
+  logger.debug(
+    "replace",
+    string.format("Replacing range lines %d-%d with %d chars", range.start_line, range.end_line, #new_text)
+  )
+
+  local lines = vim.split(new_text, "\n", { plain = true })
+  vim.api.nvim_buf_set_lines(bufnr, range.start_line - 1, range.end_line, false, lines)
+
+  logger.info("replace", "Range replacement completed")
+end
+
 return M

@@ -324,6 +324,80 @@ describe("diff", function()
       assert.equals(0, diff.conflict_count(0))
     end)
   end)
+
+  describe("unified diff application", function()
+    it("applies a single-hunk unified diff", function()
+      local patched, err = diff.apply_model_diff("local x = 1", "@@ -1 +1 @@\n-local x = 1\n+local x = 2")
+
+      assert.is_nil(err)
+      assert.equals("local x = 2", patched)
+    end)
+
+    it("applies a multi-hunk unified diff", function()
+      local original = table.concat({
+        "alpha",
+        "beta",
+        "gamma",
+        "delta",
+      }, "\n")
+      local response = table.concat({
+        "@@ -1,4 +1,4 @@",
+        "-alpha",
+        "+alpha2",
+        " beta",
+        " gamma",
+        "-delta",
+        "+delta2",
+      }, "\n")
+
+      local patched, err = diff.apply_model_diff(original, response)
+
+      assert.is_nil(err)
+      assert.equals("alpha2\nbeta\ngamma\ndelta2", patched)
+    end)
+
+    it("parses fenced diff blocks", function()
+      local patched, err = diff.apply_model_diff("one", "```diff\n@@ -1 +1 @@\n-one\n+two\n```")
+
+      assert.is_nil(err)
+      assert.equals("two", patched)
+    end)
+
+    it("rejects malformed diff responses", function()
+      local patched, err = diff.apply_model_diff("one", "not a diff")
+
+      assert.is_nil(patched)
+      assert.equals("Response must be a unified diff only", err)
+    end)
+
+    it("rejects context mismatches", function()
+      local patched, err = diff.apply_model_diff("one", "@@ -1 +1 @@\n-two\n+three")
+
+      assert.is_nil(patched)
+      assert.is_true(err:find("Diff removal mismatch", 1, true) ~= nil)
+    end)
+
+    it("extracts insert results from patched context", function()
+      local result, err = diff.extract_insert_result(
+        "before\n__NVIM_REDRAFT_CURSOR__after",
+        "before\nprint('hi')\nafter"
+      )
+
+      assert.is_nil(err)
+      assert.equals("before\nprint('hi')\nafter", result.patched_text)
+      assert.equals("print('hi')\n", result.inserted_text)
+    end)
+
+    it("rejects patched insert contexts that keep the marker", function()
+      local result, err = diff.extract_insert_result(
+        "before\n__NVIM_REDRAFT_CURSOR__after",
+        "before\n__NVIM_REDRAFT_CURSOR__after"
+      )
+
+      assert.is_nil(result)
+      assert.equals("Patched insert context must remove the cursor marker", err)
+    end)
+  end)
 end)
 
 describe("edge cases", function()

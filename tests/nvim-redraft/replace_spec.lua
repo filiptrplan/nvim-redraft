@@ -174,4 +174,15 @@ describe("replace", function()
       assert.same({ 3, 0 }, cursor)
     end)
   end)
+
+  describe("replace_range", function()
+    it("should replace the specified line range", function()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { "before", "target", "after" })
+
+      replace.replace_range({ start_line = 2, end_line = 2 }, "updated\nvalue")
+
+      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+      assert.same({ "before", "updated", "value", "after" }, lines)
+    end)
+  end)
 end)
